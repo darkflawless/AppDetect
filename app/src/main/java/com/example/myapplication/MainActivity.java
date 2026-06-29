@@ -6,11 +6,12 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.ImageFormat;
+import android.graphics.Matrix;
 import android.graphics.Rect;
 import android.graphics.YuvImage;
 import android.os.Bundle;
 import android.util.Log;
-import android.view.View;
+import android.widget.ImageButton;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -41,73 +42,82 @@ import java.util.concurrent.Executors;
 
 public class MainActivity extends AppCompatActivity {
 
-    private static final String TAG = "SeatbeltApp";
+    private static final String TAG = "AppDetectMain";
 
     // UI Views
     private PreviewView cameraPreview;
     private BoundingBoxOverlay bboxOverlay;
+    private android.view.View redFlashOverlay;
     private TextView statusIcon;
     private TextView statusText;
     private TextView confidenceText;
     private TextView fpsText;
+    private ImageButton btnSwitchCamera;
 
     // Detector + Threading
     private YoloDetector detector;
+    private DrowsinessDetector drowsinessDetector;
     private ExecutorService cameraExecutor;
+    private ExecutorService yoloExecutor; // Luồng riêng biệt cho YOLO
+
+    // Camera state
+    private int lensFacing = CameraSelector.LENS_FACING_FRONT;
 
     // FPS tracking
     private long lastFrameTime = 0L;
+    private boolean isProcessing = false; // Cờ chặn chồng chéo frame
 
-    // Labels từ file assets/labels.txt
+    // Labels
     private String[] labels;
 
-    // --------------------------------------------------------
-    // Launcher xin quyền camera
-    // --------------------------------------------------------
-    private final ActivityResultLauncher<String> cameraPermissionLauncher =
-            registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
+    private final ActivityResultLauncher<String> cameraPermissionLauncher = registerForActivityResult(
+            new ActivityResultContracts.RequestPermission(), granted -> {
                 if (granted) {
                     startCamera();
                 } else {
-                    Toast.makeText(this,
-                            "App cần quyền camera để hoạt động!", Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "App cần quyền camera để hoạt động!", Toast.LENGTH_LONG).show();
                     statusText.setText("Cần cấp quyền camera");
                     statusIcon.setText("🚫");
                 }
             });
 
-    // --------------------------------------------------------
-    // onCreate
-    // --------------------------------------------------------
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
         // Bind views
-        cameraPreview   = findViewById(R.id.camera_preview);
-        bboxOverlay     = findViewById(R.id.bbox_overlay);
-        statusIcon      = findViewById(R.id.status_icon);
-        statusText      = findViewById(R.id.status_text);
-        confidenceText  = findViewById(R.id.confidence_text);
-        fpsText         = findViewById(R.id.fps_text);
+        cameraPreview = findViewById(R.id.camera_preview);
+        bboxOverlay = findViewById(R.id.bbox_overlay);
+        redFlashOverlay = findViewById(R.id.red_flash_overlay);
+        statusIcon = findViewById(R.id.status_icon);
+        statusText = findViewById(R.id.status_text);
+        confidenceText = findViewById(R.id.confidence_text);
+        fpsText = findViewById(R.id.fps_text);
+        btnSwitchCamera = findViewById(R.id.btn_switch_camera);
 
-        // Load labels
+        btnSwitchCamera.setOnClickListener(v -> {
+            lensFacing = (lensFacing == CameraSelector.LENS_FACING_BACK)
+                    ? CameraSelector.LENS_FACING_FRONT
+                    : CameraSelector.LENS_FACING_BACK;
+            startCamera();
+        });
+
         labels = loadLabels();
-        Log.d(TAG, "Labels loaded: " + java.util.Arrays.toString(labels));
 
-        // Load model (chạy trên background thread để không block UI)
         cameraExecutor = Executors.newSingleThreadExecutor();
+        yoloExecutor = Executors.newSingleThreadExecutor(); // Khởi tạo luồng cho YOLO
         cameraExecutor.execute(() -> {
             try {
-                detector = new YoloDetector(this, labels);
-                Log.d(TAG, "Model loaded successfully");
+                drowsinessDetector = new DrowsinessDetector(this);
+                // detector = new YoloDetector(this, labels);
+
                 runOnUiThread(() -> {
-                    statusText.setText("Model sẵn sàng!");
+                    statusText.setText("Tất cả Model đã sẵn sàng!");
                     checkAndStartCamera();
                 });
-            } catch (IOException e) {
-                Log.e(TAG, "Failed to load model", e);
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to load models", e);
                 runOnUiThread(() -> {
                     statusIcon.setText("❌");
                     statusText.setText("Lỗi load model: " + e.getMessage());
@@ -116,48 +126,43 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    // --------------------------------------------------------
-    // Kiểm tra quyền camera
-    // --------------------------------------------------------
     private void checkAndStartCamera() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
-                == PackageManager.PERMISSION_GRANTED) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             startCamera();
         } else {
             cameraPermissionLauncher.launch(Manifest.permission.CAMERA);
         }
     }
 
-    // --------------------------------------------------------
-    // Khởi động CameraX
-    // --------------------------------------------------------
     private void startCamera() {
-        ListenableFuture<ProcessCameraProvider> cameraProviderFuture =
-                ProcessCameraProvider.getInstance(this);
+        ListenableFuture<ProcessCameraProvider> cameraProviderFuture = ProcessCameraProvider.getInstance(this);
 
         cameraProviderFuture.addListener(() -> {
             try {
                 ProcessCameraProvider cameraProvider = cameraProviderFuture.get();
 
-                // Preview use case
                 Preview preview = new Preview.Builder().build();
                 preview.setSurfaceProvider(cameraPreview.getSurfaceProvider());
 
-                // ImageAnalysis use case - nhận frame để chạy model
                 ImageAnalysis imageAnalysis = new ImageAnalysis.Builder()
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                        .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                         .build();
 
-                imageAnalysis.setAnalyzer(cameraExecutor, this::analyzeFrame);
+                imageAnalysis.setAnalyzer(cameraExecutor, imageProxy -> {
+                    if (isProcessing) {
+                        imageProxy.close();
+                        return;
+                    }
+                    analyzeFrame(imageProxy);
+                });
 
-                // Dùng camera sau
-                CameraSelector cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA;
+                CameraSelector cameraSelector = new CameraSelector.Builder()
+                        .requireLensFacing(lensFacing)
+                        .build();
 
-                // Unbind trước rồi bind lại
                 cameraProvider.unbindAll();
                 cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageAnalysis);
-
-                Log.d(TAG, "Camera started");
 
             } catch (ExecutionException | InterruptedException e) {
                 Log.e(TAG, "Camera start failed", e);
@@ -165,158 +170,164 @@ public class MainActivity extends AppCompatActivity {
         }, ContextCompat.getMainExecutor(this));
     }
 
-    // --------------------------------------------------------
-    // Phân tích từng frame từ camera
-    // --------------------------------------------------------
+    private long lastTimestampMs = -1;
+
     private void analyzeFrame(@NonNull ImageProxy imageProxy) {
-        if (detector == null) {
+        isProcessing = true;
+        if (drowsinessDetector == null) {
             imageProxy.close();
+            isProcessing = false;
             return;
         }
 
         try {
-            // Chuyển ImageProxy → Bitmap
             Bitmap bitmap = imageProxyToBitmap(imageProxy);
             if (bitmap == null) {
-                imageProxy.close();
+                isProcessing = false;
                 return;
             }
 
-            // Chạy inference
-            List<YoloDetector.Detection> detections = detector.detect(bitmap);
+            long timestampMs = imageProxy.getImageInfo().getTimestamp() / 1000000;
+            if (timestampMs <= lastTimestampMs) {
+                timestampMs = lastTimestampMs + 1;
+            }
+            lastTimestampMs = timestampMs;
 
-            // Tính FPS
+            // 1. Chạy YOLO nhận diện dây an toàn
+            // java.util.concurrent.Future<List<YoloDetector.Detection>> yoloFuture = yoloExecutor.submit(() -> {
+            //     return detector.detect(bitmap);
+            // });
+
+            // 2. Chạy MediaPipe nhận diện ngủ gật
+            DrowsinessDetector.DrowsinessResult drowsinessResult = drowsinessDetector.detect(bitmap, timestampMs);
+
+            // 3. Đợi YOLO chạy xong và lấy kết quả vào một danh sách có thể thay đổi (ArrayList)
+            // List<YoloDetector.Detection> seatbeltDetections = new ArrayList<>(yoloFuture.get());
+            List<YoloDetector.Detection> seatbeltDetections = new ArrayList<>();
+
+            // 4. Thêm Bbox của khuôn mặt vào danh sách để hiển thị trên Overlay
+            if (drowsinessResult.faceDetected && drowsinessResult.faceBbox != null) {
+                String faceLabel = "Face";
+                if (drowsinessResult.isDrowsy) faceLabel = "Drowsy";
+                else if (drowsinessResult.isYawning) faceLabel = "Yawning";
+
+                seatbeltDetections.add(new YoloDetector.Detection(
+                        drowsinessResult.faceBbox,
+                        -1,
+                        1.0f,
+                        faceLabel));
+            }
+
             long now = System.currentTimeMillis();
             float fps = (lastFrameTime > 0) ? 1000f / (now - lastFrameTime) : 0f;
             lastFrameTime = now;
 
-            // Cập nhật UI trên main thread
-            runOnUiThread(() -> updateUI(detections, fps));
+            runOnUiThread(() -> updateUI(seatbeltDetections, drowsinessResult, fps));
 
+        } catch (Exception e) {
+            Log.e(TAG, "Error analyzing frame", e);
         } finally {
             imageProxy.close();
+            isProcessing = false;
         }
     }
 
-    // --------------------------------------------------------
-    // Chuyển ImageProxy (YUV_420_888) → Bitmap
-    // --------------------------------------------------------
     private Bitmap imageProxyToBitmap(@NonNull ImageProxy imageProxy) {
-        ImageProxy.PlaneProxy[] planes = imageProxy.getPlanes();
-        if (planes == null || planes.length < 3) return null;
+        Bitmap bitmap = imageProxy.toBitmap();
+        if (bitmap == null) return null;
 
-        ByteBuffer yBuffer  = planes[0].getBuffer();
-        ByteBuffer uBuffer  = planes[1].getBuffer();
-        ByteBuffer vBuffer  = planes[2].getBuffer();
+        Matrix matrix = new Matrix();
+        matrix.postRotate(imageProxy.getImageInfo().getRotationDegrees());
 
-        int ySize = yBuffer.remaining();
-        int uSize = uBuffer.remaining();
-        int vSize = vBuffer.remaining();
+        if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
+            matrix.postScale(-1f, 1f, bitmap.getWidth() / 2f, bitmap.getHeight() / 2f);
+        }
 
-        byte[] nv21 = new byte[ySize + uSize + vSize];
-        yBuffer.get(nv21, 0, ySize);
-        vBuffer.get(nv21, ySize, vSize);
-        uBuffer.get(nv21, ySize + vSize, uSize);
+        // TỐI ƯU: Thu nhỏ ảnh xuống 480px để tăng tốc độ AI
+        int targetSize = 480;
+        float scale = (float) targetSize / Math.max(bitmap.getWidth(), bitmap.getHeight());
+        matrix.postScale(scale, scale);
 
-        YuvImage yuvImage = new YuvImage(
-                nv21, ImageFormat.NV21,
-                imageProxy.getWidth(), imageProxy.getHeight(), null);
-
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        yuvImage.compressToJpeg(
-                new Rect(0, 0, imageProxy.getWidth(), imageProxy.getHeight()), 85, out);
-
-        byte[] jpegBytes = out.toByteArray();
-        return BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.length);
+        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true);
     }
 
-    // --------------------------------------------------------
-    // Cập nhật giao diện sau mỗi frame
-    // --------------------------------------------------------
-    private void updateUI(List<YoloDetector.Detection> detections, float fps) {
-        // Cập nhật FPS
+    private void updateUI(List<YoloDetector.Detection> detections, DrowsinessDetector.DrowsinessResult dResult, float fps) {
         fpsText.setText(String.format("%.1f FPS", fps));
-
-        // Cập nhật overlay
         bboxOverlay.setDetections(detections);
 
-        if (detections.isEmpty()) {
-            // Không detect được gì
-            statusIcon.setText("🔍");
-            statusText.setText("Đang tìm kiếm...");
-            statusText.setTextColor(Color.WHITE);
-            confidenceText.setText("");
-            return;
-        }
-
-        // Kiểm tra xem có detection nào là "belt" không
-        YoloDetector.Detection bestBelt   = null;
+        YoloDetector.Detection bestBelt = null;
         YoloDetector.Detection bestNoBelt = null;
-
         for (YoloDetector.Detection d : detections) {
-            boolean isBelt = d.label.equalsIgnoreCase("belt")
-                          || d.label.equalsIgnoreCase("seatbelt");
-            if (isBelt) {
-                if (bestBelt == null || d.confidence > bestBelt.confidence) {
-                    bestBelt = d;
-                }
-            } else {
-                if (bestNoBelt == null || d.confidence > bestNoBelt.confidence) {
-                    bestNoBelt = d;
-                }
+            if (d.label.equalsIgnoreCase("seatbelt") || d.label.equalsIgnoreCase("belt")) {
+                if (bestBelt == null || d.confidence > bestBelt.confidence) bestBelt = d;
+            } else if (d.label.equalsIgnoreCase("no-seatbelt") || d.label.equalsIgnoreCase("no_belt")) {
+                if (bestNoBelt == null || d.confidence > bestNoBelt.confidence) bestNoBelt = d;
             }
         }
 
-        if (bestBelt != null) {
-            // CÓ DÂY AN TOÀN
-            statusIcon.setText("✅");
-            statusText.setText("AN TOÀN - Đang đeo dây");
-            statusText.setTextColor(Color.parseColor("#00E676"));
-            confidenceText.setText(String.format("Độ chắc chắn: %.1f%%", bestBelt.confidence * 100f));
-        } else if (bestNoBelt != null) {
-            // KHÔNG ĐEO DÂY
-            statusIcon.setText("⚠️");
-            statusText.setText("NGUY HIỂM - Không đeo dây!");
-            statusText.setTextColor(Color.parseColor("#FF1744"));
-            confidenceText.setText(String.format("Độ chắc chắn: %.1f%%", bestNoBelt.confidence * 100f));
+        // Logic hiển thị (Ưu tiên các cảnh báo nguy hiểm trước)
+        if (dResult.faceDetected && dResult.isDrowsy) {
+            redFlashOverlay.setVisibility(android.view.View.VISIBLE);
+            statusIcon.setText("😴");
+            statusText.setText("NGUY HIỂM - ĐANG NGỦ GẬT!");
+            statusText.setTextColor(Color.RED);
+            confidenceText.setText(String.format("Hãy dừng xe! (EAR: %.2f)", dResult.ear));
+        } else {
+            redFlashOverlay.setVisibility(android.view.View.GONE);
+
+            if (dResult.faceDetected && dResult.isYawning) {
+                statusIcon.setText("🥱");
+                statusText.setText("CẢNH BÁO - Đang ngáp!");
+                statusText.setTextColor(Color.parseColor("#FF9100"));
+                confidenceText.setText("Bạn có vẻ đang mệt mỏi.");
+            } else if (bestNoBelt != null) {
+                statusIcon.setText("⚠️");
+                statusText.setText("CẢNH BÁO - Không đeo dây!");
+                statusText.setTextColor(Color.RED);
+                confidenceText.setText(String.format("Độ tin cậy: %.1f%%", bestNoBelt.confidence * 100f));
+            } else if (bestBelt != null) {
+                statusIcon.setText("✅");
+                statusText.setText("AN TOÀN - Đang đeo dây");
+                statusText.setTextColor(Color.GREEN);
+                confidenceText.setText(String.format("Độ tin cậy: %.1f%%", bestBelt.confidence * 100f));
+            } else {
+                statusIcon.setText("🔍");
+                statusText.setText(dResult.faceDetected ? "Đã thấy mặt - Đang theo dõi..." : "Đang tìm kiếm khuôn mặt...");
+                statusText.setTextColor(Color.WHITE);
+
+                if (dResult.faceDetected) {
+                    // Hiện EAR và thời gian nhắm mắt ra màn hình để theo dõi trực tiếp
+                    confidenceText.setText(String.format("EAR: %.2f (Nhắm mắt: %dms/3000ms)",
+                            dResult.ear, dResult.closedEyeDurationMs));
+                } else {
+                    confidenceText.setText("");
+                }
+            }
         }
     }
 
-    // --------------------------------------------------------
-    // Đọc labels từ assets/labels.txt
-    // --------------------------------------------------------
     private String[] loadLabels() {
         List<String> labelList = new ArrayList<>();
         try {
-            BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(getAssets().open("labels.txt")));
+            BufferedReader reader = new BufferedReader(new InputStreamReader(getAssets().open("labels.txt")));
             String line;
             while ((line = reader.readLine()) != null) {
                 line = line.trim();
-                if (!line.isEmpty()) {
-                    labelList.add(line);
-                }
+                if (!line.isEmpty()) labelList.add(line);
             }
             reader.close();
         } catch (IOException e) {
-            Log.e(TAG, "Failed to read labels.txt", e);
-            // Fallback labels nếu file không đọc được
-            return new String[]{"no-seatbelt", "seatbelt"};
+            Log.e(TAG, "Error loading labels", e);
         }
         return labelList.toArray(new String[0]);
     }
 
-    // --------------------------------------------------------
-    // Lifecycle
-    // --------------------------------------------------------
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (cameraExecutor != null) {
-            cameraExecutor.shutdown();
-        }
-        if (detector != null) {
-            detector.close();
-        }
+        if (cameraExecutor != null) cameraExecutor.shutdown();
+        if (yoloExecutor != null) yoloExecutor.shutdown();
+        if (detector != null) detector.close();
+        if (drowsinessDetector != null) drowsinessDetector.close();
     }
 }

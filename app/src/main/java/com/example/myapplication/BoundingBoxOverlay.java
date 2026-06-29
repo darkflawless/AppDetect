@@ -86,9 +86,15 @@ public class BoundingBoxOverlay extends View {
         float viewH = getHeight();
 
         for (YoloDetector.Detection det : detections) {
-            // Xác định màu theo class
-            boolean isBelt = isBeltClass(det.label);
-            int color = isBelt ? COLOR_BELT : COLOR_NO_BELT;
+            String lower = det.label.toLowerCase();
+            int color;
+            if (lower.equals("belt") || lower.equals("seatbelt") || lower.equals("face")) {
+                color = COLOR_BELT; // Xanh lá
+            } else if (lower.equals("yawning")) {
+                color = Color.parseColor("#FF9100"); // Cam
+            } else {
+                color = COLOR_NO_BELT; // Đỏ (no-belt hoặc drowsy)
+            }
 
             boxPaint.setColor(color);
             cornerPaint.setColor(color);
@@ -110,9 +116,17 @@ public class BoundingBoxOverlay extends View {
             drawCorners(canvas, left, top, right, bottom, cornerLen, cornerPaint);
 
             // --- Vẽ label phía trên box ---
-            String prefix   = isBelt ? "✓ " : "✗ ";
-            String labelText = prefix + det.label.toUpperCase()
-                    + "  " + String.format("%.0f%%", det.confidence * 100f);
+            String prefix = "";
+            if (lower.equals("belt") || lower.equals("seatbelt")) prefix = "✓ ";
+            else if (lower.equals("no-belt") || lower.equals("no_belt")) prefix = "✗ ";
+            else if (lower.equals("drowsy")) prefix = "😴 ";
+            else if (lower.equals("yawning")) prefix = "🥱 ";
+            else if (lower.equals("face")) prefix = "👤 ";
+
+            String labelText = prefix + det.label.toUpperCase();
+            if (!lower.equals("face") && !lower.equals("drowsy") && !lower.equals("yawning")) {
+                labelText += "  " + String.format("%.0f%%", det.confidence * 100f);
+            }
 
             float textH = labelPaint.getTextSize() + 14f;
             float textW = labelPaint.measureText(labelText) + 24f;
@@ -133,7 +147,7 @@ public class BoundingBoxOverlay extends View {
      * Vẽ 4 góc chữ L cho bounding box (trông pro hơn box thường).
      */
     private void drawCorners(Canvas canvas, float l, float t, float r, float b,
-                              float len, Paint paint) {
+                             float len, Paint paint) {
         // Góc trên-trái
         canvas.drawLine(l, t, l + len, t, paint);
         canvas.drawLine(l, t, l, t + len, paint);

@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/main"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -18,6 +19,14 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <!-- Red flash overlay cảnh báo ngủ gật -->
+    <View
+        android:id="@+id/red_flash_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#66FF0000"
+        android:visibility="gone" />
+
     <!-- Thanh trạng thái phía trên -->
     <LinearLayout
         android:id="@+id/top_bar"
@@ -28,7 +37,8 @@
         android:paddingTop="48dp"
         android:paddingHorizontal="20dp"
         android:paddingBottom="12dp"
-        android:background="#88000000">
+        android:background="#88000000"
+        android:gravity="center_vertical">
 
         <TextView
             android:id="@+id/title_text"
@@ -44,9 +54,20 @@
             android:id="@+id/fps_text"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_marginEnd="16dp"
             android:text="-- FPS"
             android:textColor="#AAFFFFFF"
             android:textSize="13sp" />
+
+        <ImageButton
+            android:id="@+id/btn_switch_camera"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_menu_camera"
+            android:contentDescription="Switch Camera"
+            android:scaleType="centerInside"
+            app:tint="#FFFFFF" />
     </LinearLayout>
 
     <!-- Panel kết quả phía dưới -->
