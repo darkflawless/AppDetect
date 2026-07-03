@@ -10,6 +10,7 @@ java {
 
 android {
     namespace = "com.example.myapplication"
+    // Giữ nguyên cấu hình SDK của bạn
     compileSdk {
         version = release(36) {
             minorApiLevel = 1
@@ -43,6 +44,13 @@ android {
     androidResources {
         noCompress += "tflite"
     }
+
+    // Fix lỗi 16KB ELF alignment: không nén file .so để giữ nguyên alignment
+    packaging {
+        jniLibs {
+            useLegacyPackaging = false
+        }
+    }
 }
 
 dependencies {
@@ -57,8 +65,14 @@ dependencies {
     implementation(libs.camera.lifecycle)
     implementation(libs.camera.view)
 
-    // TensorFlow Lite (LiteRT)
+    // TensorFlow Lite (LiteRT V1 — hỗ trợ GPU Delegate với Interpreter API)
     implementation(libs.litert)
+    implementation(libs.litert.gpu)         // GPU Delegate runtime
+    implementation(libs.litert.gpu.api)     // GPU Delegate API (CompatibilityList, GpuDelegate)
+
+    // ML Kit Face Detection - thay thế MediaPipe
+    // Dùng Google Play Services: không bundle .so vào APK → không bao giờ lỗi 16KB
+    implementation(libs.mlkit.face.detection)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.espresso.core)

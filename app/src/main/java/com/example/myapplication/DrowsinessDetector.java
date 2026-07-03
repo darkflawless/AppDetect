@@ -2,32 +2,43 @@ package com.example.myapplication;
 
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.graphics.PointF;
+import android.graphics.RectF;
 
-import com.google.mediapipe.framework.image.BitmapImageBuilder;
-import com.google.mediapipe.framework.image.MPImage;
-import com.google.mediapipe.tasks.core.BaseOptions;
-import com.google.mediapipe.tasks.vision.core.RunningMode;
-import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker;
-import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker.FaceLandmarkerOptions;
-import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarkerResult;
-import com.google.mediapipe.tasks.components.containers.NormalizedLandmark;
+import com.google.android.gms.tasks.Tasks;
+import com.google.mlkit.vision.common.InputImage;
+import com.google.mlkit.vision.face.Face;
+import com.google.mlkit.vision.face.FaceContour;
+import com.google.mlkit.vision.face.FaceDetection;
+import com.google.mlkit.vision.face.FaceDetector;
+import com.google.mlkit.vision.face.FaceDetectorOptions;
 
-import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
 
+/**
+ * DrowsinessDetector — phát hiện ngủ gật dựa trên EAR và MAR.
+ *
+ * Thay thế MediaPipe FaceLandmarker bằng ML Kit Face Detection
+ * (Google Play Services) để tránh lỗi 16KB ELF alignment.
+ *
+ * EAR = Eye Aspect Ratio: mắt nhắm → EAR thấp
+ * MAR = Mouth Aspect Ratio: miệng há → MAR cao
+ */
 public class DrowsinessDetector {
 
-    private static final String MODEL_ASSET_PATH = "face_landmarker.task";
-    public static final float EAR_THRESHOLD = 0.21f; // Cân bằng lại ngưỡng EAR
+    public static final float EAR_THRESHOLD = 0.21f;
     public static final float MAR_THRESHOLD = 0.5f;
-    public static final long CLOSED_EYE_TIME_THRESHOLD_MS = 3000; // Nhắm mắt 3 giây là báo
-    private static final long ALERT_PERSISTENCE_MS = 1000; // Duy trì 1s để không chớp tắt
+    public static final long CLOSED_EYE_TIME_THRESHOLD_MS = 3000; // 3 giây nhắm mắt = báo động
+    private static final long ALERT_PERSISTENCE_MS = 1000;         // Duy trì cảnh báo 1 giây
 
-    private FaceLandmarker faceLandmarker;
+    private final FaceDetector faceDetector;
     private long firstClosedEyeTime = 0;
     private long lastDrowsyTime = 0;
-    private int closedEyeFrames = 0;
 
+    // -------------------------------------------------------------------------
+    // Kết quả trả về cho MainActivity
+    // -------------------------------------------------------------------------
     public static class DrowsinessResult {
         public boolean faceDetected = false;
         public boolean isDrowsy = false;
@@ -35,125 +46,163 @@ public class DrowsinessDetector {
         public float ear = 0f;
         public float mar = 0f;
         public long closedEyeDurationMs = 0;
-        public android.graphics.RectF faceBbox = null;
+        public RectF faceBbox = null;
     }
 
+    // -------------------------------------------------------------------------
+    // Khởi tạo
+    // -------------------------------------------------------------------------
     public DrowsinessDetector(Context context) {
-        BaseOptions baseOptions = BaseOptions.builder()
-                .setModelAssetPath(MODEL_ASSET_PATH)
+        FaceDetectorOptions options = new FaceDetectorOptions.Builder()
+                .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+                .setContourMode(FaceDetectorOptions.CONTOUR_MODE_ALL) // Lấy contour mắt + môi
+                .setMinFaceSize(0.15f)                                  // Bỏ qua mặt quá nhỏ
                 .build();
 
-        FaceLandmarkerOptions options = FaceLandmarkerOptions.builder()
-                .setBaseOptions(baseOptions)
-                .setRunningMode(RunningMode.VIDEO)
-                .setNumFaces(1)
-                .setMinFaceDetectionConfidence(0.3f)
-                .setMinFacePresenceConfidence(0.3f)
-                .setMinTrackingConfidence(0.3f)
-                .build();
-
-        faceLandmarker = FaceLandmarker.createFromOptions(context, options);
+        faceDetector = FaceDetection.getClient(options);
     }
 
+    // -------------------------------------------------------------------------
+    // Phát hiện ngủ gật — gọi từ background thread (cameraExecutor)
+    // -------------------------------------------------------------------------
     public DrowsinessResult detect(Bitmap bitmap, long timestampMs) {
         DrowsinessResult result = new DrowsinessResult();
 
-        MPImage mpImage = new BitmapImageBuilder(bitmap).build();
-        FaceLandmarkerResult landmarkerResult = faceLandmarker.detectForVideo(mpImage, timestampMs);
+        try {
+            InputImage inputImage = InputImage.fromBitmap(bitmap, 0);
 
-        if (landmarkerResult.faceLandmarks().isEmpty()) {
-            firstClosedEyeTime = 0;
-            result.isDrowsy = (System.currentTimeMillis() - lastDrowsyTime < ALERT_PERSISTENCE_MS);
-            return result;
-        }
+            // Tasks.await() dùng OK vì đang trên background thread
+            List<Face> faces = Tasks.await(faceDetector.process(inputImage));
 
-        result.faceDetected = true;
-        List<NormalizedLandmark> landmarks = landmarkerResult.faceLandmarks().get(0);
-
-        float minX = 1.0f, minY = 1.0f, maxX = 0.0f, maxY = 0.0f;
-        for (NormalizedLandmark lm : landmarks) {
-            if (lm.x() < minX)
-                minX = lm.x();
-            if (lm.y() < minY)
-                minY = lm.y();
-            if (lm.x() > maxX)
-                maxX = lm.x();
-            if (lm.y() > maxY)
-                maxY = lm.y();
-        }
-        result.faceBbox = new android.graphics.RectF(minX, minY, maxX, maxY);
-
-        int width = bitmap.getWidth();
-        int height = bitmap.getHeight();
-
-        int[] LEFT_EYE_IDX = { 362, 385, 387, 263, 373, 380 };
-        int[] RIGHT_EYE_IDX = { 33, 160, 158, 133, 153, 144 };
-        int[] MOUTH_IDX = { 61, 291, 13, 14 };
-
-        List<NormalizedLandmark> leftEye = new ArrayList<>();
-        for (int idx : LEFT_EYE_IDX)
-            leftEye.add(landmarks.get(idx));
-
-        List<NormalizedLandmark> rightEye = new ArrayList<>();
-        for (int idx : RIGHT_EYE_IDX)
-            rightEye.add(landmarks.get(idx));
-
-        List<NormalizedLandmark> mouth = new ArrayList<>();
-        for (int idx : MOUTH_IDX)
-            mouth.add(landmarks.get(idx));
-
-        float leftEar = calculateEar(leftEye, width, height);
-        float rightEar = calculateEar(rightEye, width, height);
-        result.ear = (leftEar + rightEar) / 2.0f;
-        result.mar = calculateMar(mouth, width, height);
-
-        if (result.ear < EAR_THRESHOLD) {
-            if (firstClosedEyeTime == 0) {
-                firstClosedEyeTime = System.currentTimeMillis();
+            if (faces.isEmpty()) {
+                firstClosedEyeTime = 0;
+                result.isDrowsy = (System.currentTimeMillis() - lastDrowsyTime < ALERT_PERSISTENCE_MS);
+                return result;
             }
-        } else {
-            firstClosedEyeTime = 0;
+
+            Face face = faces.get(0);
+            result.faceDetected = true;
+
+            // Bounding box khuôn mặt (normalize về [0,1])
+            android.graphics.Rect bbox = face.getBoundingBox();
+            float imgW = bitmap.getWidth();
+            float imgH = bitmap.getHeight();
+            result.faceBbox = new RectF(
+                    Math.max(0f, bbox.left   / imgW),
+                    Math.max(0f, bbox.top    / imgH),
+                    Math.min(1f, bbox.right  / imgW),
+                    Math.min(1f, bbox.bottom / imgH)
+            );
+
+            // --- Tính EAR từ contour mắt ---
+            FaceContour leftEyeContour  = face.getContour(FaceContour.LEFT_EYE);
+            FaceContour rightEyeContour = face.getContour(FaceContour.RIGHT_EYE);
+
+            if (leftEyeContour != null && rightEyeContour != null) {
+                float leftEar  = calcEar(leftEyeContour.getPoints());
+                float rightEar = calcEar(rightEyeContour.getPoints());
+                result.ear = (leftEar + rightEar) / 2.0f;
+            }
+
+            // --- Tính MAR từ contour môi ---
+            FaceContour upperLipTop    = face.getContour(FaceContour.UPPER_LIP_TOP);
+            FaceContour lowerLipBottom = face.getContour(FaceContour.LOWER_LIP_BOTTOM);
+
+            if (upperLipTop != null && lowerLipBottom != null) {
+                result.mar = calcMar(upperLipTop.getPoints(), lowerLipBottom.getPoints());
+            }
+
+            // --- Logic cảnh báo ngủ gật ---
+            if (result.ear < EAR_THRESHOLD) {
+                if (firstClosedEyeTime == 0) {
+                    firstClosedEyeTime = System.currentTimeMillis();
+                }
+            } else {
+                firstClosedEyeTime = 0;
+            }
+
+            long currentClosedDuration = (firstClosedEyeTime > 0)
+                    ? (System.currentTimeMillis() - firstClosedEyeTime) : 0;
+
+            if (currentClosedDuration >= CLOSED_EYE_TIME_THRESHOLD_MS) {
+                lastDrowsyTime = System.currentTimeMillis();
+            }
+
+            result.closedEyeDurationMs = currentClosedDuration;
+            result.isDrowsy = (currentClosedDuration >= CLOSED_EYE_TIME_THRESHOLD_MS)
+                    || (System.currentTimeMillis() - lastDrowsyTime < ALERT_PERSISTENCE_MS);
+            result.isYawning = (result.mar > MAR_THRESHOLD);
+
+        } catch (ExecutionException | InterruptedException e) {
+            // Nếu lỗi inference, trả về result mặc định (không crash app)
         }
-
-        long currentClosedDuration = (firstClosedEyeTime > 0) ? (System.currentTimeMillis() - firstClosedEyeTime) : 0;
-
-        if (currentClosedDuration >= CLOSED_EYE_TIME_THRESHOLD_MS) {
-            lastDrowsyTime = System.currentTimeMillis();
-        }
-
-        result.closedEyeDurationMs = currentClosedDuration;
-        result.isDrowsy = (currentClosedDuration >= CLOSED_EYE_TIME_THRESHOLD_MS)
-                || (System.currentTimeMillis() - lastDrowsyTime < ALERT_PERSISTENCE_MS);
-        result.isYawning = (result.mar > MAR_THRESHOLD);
 
         return result;
     }
 
-    private float calculateEar(List<NormalizedLandmark> eye, int w, int h) {
-        if (eye.size() < 6)
-            return 0f;
-        float A = distance(eye.get(1), eye.get(5), w, h);
-        float B = distance(eye.get(2), eye.get(4), w, h);
-        float C = distance(eye.get(0), eye.get(3), w, h);
+    // -------------------------------------------------------------------------
+    // EAR — Eye Aspect Ratio
+    // ML Kit trả về 16 điểm cho mỗi mắt, đi theo chiều kim đồng hồ:
+    //   p[0]  = góc ngoài
+    //   p[4]  = đỉnh trên
+    //   p[8]  = góc trong
+    //   p[12] = đỉnh dưới
+    //
+    // EAR = (A + B) / (2 * C)
+    //   A = khoảng cách dọc tại 1/4 từ ngoài vào  (p[2]  <-> p[14])
+    //   B = khoảng cách dọc ở giữa mắt             (p[4]  <-> p[12])
+    //   C = khoảng cách ngang (chiều rộng mắt)      (p[0]  <-> p[8])
+    // -------------------------------------------------------------------------
+    private float calcEar(List<PointF> pts) {
+        if (pts == null || pts.size() < 16) return 0.3f; // mặt định: mắt mở
+
+        float A = dist(pts.get(2),  pts.get(14));
+        float B = dist(pts.get(4),  pts.get(12));
+        float C = dist(pts.get(0),  pts.get(8));
+
+        if (C < 1f) return 0.3f;
         return (A + B) / (2.0f * C);
     }
 
-    private float calculateMar(List<NormalizedLandmark> mouth, int w, int h) {
-        if (mouth.size() < 4)
-            return 0f;
-        float vertical = distance(mouth.get(2), mouth.get(3), w, h);
-        float horizontal = distance(mouth.get(0), mouth.get(1), w, h);
+    // -------------------------------------------------------------------------
+    // MAR — Mouth Aspect Ratio
+    // upperLipTop: đường viền trên của môi trên (thường ~13 điểm)
+    //   p[0]      = góc trái miệng
+    //   p[mid]    = điểm giữa trên
+    //   p[last]   = góc phải miệng
+    // lowerLipBottom: đường viền dưới của môi dưới (thường ~13 điểm)
+    //   p[mid]    = điểm giữa dưới
+    //
+    // MAR = khoảng dọc (trên-dưới) / khoảng ngang (trái-phải)
+    // -------------------------------------------------------------------------
+    private float calcMar(List<PointF> upper, List<PointF> lower) {
+        if (upper == null || lower == null || upper.size() < 3 || lower.size() < 3) return 0f;
+
+        int uMid = upper.size() / 2;
+        int lMid = lower.size() / 2;
+
+        float vertical   = dist(upper.get(uMid), lower.get(lMid));
+        float horizontal = dist(upper.get(0), upper.get(upper.size() - 1));
+
+        if (horizontal < 1f) return 0f;
         return vertical / horizontal;
     }
 
-    private float distance(NormalizedLandmark p1, NormalizedLandmark p2, int w, int h) {
-        float dx = (p1.x() - p2.x()) * w;
-        float dy = (p1.y() - p2.y()) * h;
+    // -------------------------------------------------------------------------
+    // Khoảng cách Euclidean giữa 2 điểm pixel
+    // -------------------------------------------------------------------------
+    private float dist(PointF p1, PointF p2) {
+        float dx = p1.x - p2.x;
+        float dy = p1.y - p2.y;
         return (float) Math.sqrt(dx * dx + dy * dy);
     }
 
+    // -------------------------------------------------------------------------
+    // Dọn dẹp tài nguyên
+    // -------------------------------------------------------------------------
     public void close() {
-        if (faceLandmarker != null)
-            faceLandmarker.close();
+        if (faceDetector != null) {
+            faceDetector.close();
+        }
     }
 }

@@ -7,6 +7,8 @@ import android.graphics.RectF;
 import android.util.Log;
 
 import org.tensorflow.lite.Interpreter;
+import org.tensorflow.lite.gpu.CompatibilityList;
+import org.tensorflow.lite.gpu.GpuDelegate;
 
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -25,17 +27,22 @@ import java.util.List;
  * Với 2 class (belt, no-belt) → [1, 6, 8400]
  *
  * Mỗi cột i trong 8400 là một anchor point:
- *   row 0: cx (normalized 0-1 hoặc pixel 0-640)
- *   row 1: cy
- *   row 2: w
- *   row 3: h
- *   row 4: score class 0 (belt)
- *   row 5: score class 1 (no-belt)
+ * row 0: cx (normalized 0-1 hoặc pixel 0-640)
+ * row 1: cy
+ * row 2: w
+ * row 3: h
+ * row 4: score class 0 (belt)
+ * row 5: score class 1 (no-belt)
+ *
+ * Tối ưu performance:
+ * - GPU Delegate (auto-fallback NNAPI → CPU)
+ * - Pre-allocated ByteBuffer & output array (tái dùng mỗi frame, tránh GC)
+ * - Scaled bitmap tái dùng
  */
 public class YoloDetector {
 
     private static final String TAG = "YoloDetector";
-    private static final String MODEL_FILE = "best.tflite";
+    private static final String MODEL_FILE = "best_int8.tflite";
 
     // Input size của model (YOLOv8 mặc định 640x640)
     public static final int INPUT_SIZE = 640;
@@ -47,16 +54,22 @@ public class YoloDetector {
     private static final float IOU_THRESHOLD = 0.45f;
 
     private final Interpreter interpreter;
+    private final GpuDelegate gpuDelegate;          // null nếu GPU không khả dụng
     private final String[] labels;
     private final int numClasses;
     private final int numBoxes;
     private final boolean isTransposed; // true nếu shape [1, 6, 8400]; false nếu [1, 8400, 6]
 
+    // ── Pre-allocated buffers (tái dùng mỗi frame để tránh GC pressure) ────────
+    private final ByteBuffer inputBuffer;   // [1, 640, 640, 3] float32
+    private final float[][][] outputBuffer; // [1][dim1][dim2]
+    private final int[] pixelBuffer;        // pixel scratch
+
     // --------------------------------------------------------
     // Data class chứa kết quả 1 detection
     // --------------------------------------------------------
     public static class Detection {
-        public final RectF bbox;        // Normalized [0,1]: left, top, right, bottom
+        public final RectF bbox; // Normalized [0,1]: left, top, right, bottom
         public final int classId;
         public final float confidence;
         public final String label;
@@ -75,32 +88,67 @@ public class YoloDetector {
     public YoloDetector(Context context, String[] labels) throws IOException {
         this.labels = labels;
 
-        // Load model dưới dạng MappedByteBuffer (hiệu quả nhất với file lớn)
+        // Load model dưới dạng MappedByteBuffer (memory-mapped → không copy vào heap)
         MappedByteBuffer modelBuffer = loadModelFile(context);
 
         Interpreter.Options options = new Interpreter.Options();
+
+        // ── Thử bật GPU Delegate ──────────────────────────────────────────────
+        GpuDelegate tempDelegate = null;
+        try (CompatibilityList compatList = new CompatibilityList()) {
+            if (compatList.isDelegateSupportedOnThisDevice()) {
+                GpuDelegate.Options gpuOptions = compatList.getBestOptionsForThisDevice();
+                tempDelegate = new GpuDelegate(gpuOptions);
+                options.addDelegate(tempDelegate);
+                Log.i(TAG, "✅ GPU Delegate enabled");
+            } else {
+                // Thử NNAPI (DSP/NPU nếu có)
+                options.setUseNNAPI(true);
+                Log.i(TAG, "⚡ NNAPI delegate enabled (GPU không hỗ trợ)");
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "⚠️ GPU/NNAPI delegate failed, dùng CPU: " + e.getMessage());
+            options.setUseNNAPI(false);
+        }
+        gpuDelegate = tempDelegate;
+
+        // Số luồng CPU: dùng khi GPU không có / làm backup
         options.setNumThreads(4);
+        // Cho phép fp16 precision trên CPU để tăng tốc thêm
+        options.setAllowFp16PrecisionForFp32(true);
+        // Bật XNNPack (SIMD-optimized CPU backend) — tự động trên LiteRT 2.x
+        options.setUseXNNPACK(true);
+
         interpreter = new Interpreter(modelBuffer, options);
 
-        // Phân tích output shape để biết format của model
+        // ── Phân tích output shape ────────────────────────────────────────────
         int[] outputShape = interpreter.getOutputTensor(0).shape();
         Log.d(TAG, "Input shape:  " + Arrays.toString(interpreter.getInputTensor(0).shape()));
         Log.d(TAG, "Output shape: " + Arrays.toString(outputShape));
 
         // Xác định format: [1, 6, 8400] hay [1, 8400, 6]
-        // Nếu outputShape[1] < outputShape[2] → dạng [1, channels, boxes] (transposed)
         if (outputShape[1] < outputShape[2]) {
             isTransposed = true;
             numClasses = outputShape[1] - 4;
-            numBoxes   = outputShape[2];
+            numBoxes = outputShape[2];
         } else {
             isTransposed = false;
-            numBoxes   = outputShape[1];
+            numBoxes = outputShape[1];
             numClasses = outputShape[2] - 4;
         }
-
         Log.d(TAG, "Format: " + (isTransposed ? "TRANSPOSED [1,ch,boxes]" : "NORMAL [1,boxes,ch]")
                 + " | numClasses=" + numClasses + " | numBoxes=" + numBoxes);
+
+        // ── Pre-allocate buffers ──────────────────────────────────────────────
+        // Input: 1 * 640 * 640 * 3 channels * 4 bytes (float32)
+        inputBuffer = ByteBuffer.allocateDirect(1 * INPUT_SIZE * INPUT_SIZE * 3 * 4);
+        inputBuffer.order(ByteOrder.nativeOrder());
+
+        // Output: theo đúng shape của model
+        outputBuffer = new float[outputShape[0]][outputShape[1]][outputShape[2]];
+
+        // Pixel scratch array cho getPixels()
+        pixelBuffer = new int[INPUT_SIZE * INPUT_SIZE];
     }
 
     // --------------------------------------------------------
@@ -110,21 +158,16 @@ public class YoloDetector {
         // 1. Resize về INPUT_SIZE x INPUT_SIZE
         Bitmap resized = Bitmap.createScaledBitmap(bitmap, INPUT_SIZE, INPUT_SIZE, true);
 
-        // 2. Chuyển Bitmap → ByteBuffer float32 [1, H, W, 3]
-        ByteBuffer inputBuf = bitmapToByteBuffer(resized);
+        // 2. Chuyển Bitmap → ByteBuffer float32 [1, H, W, 3] (tái dùng buffer)
+        fillInputBuffer(resized);
 
-        // 3. Chuẩn bị output buffer
-        float[][][] output;
-        int[] outShape = interpreter.getOutputTensor(0).shape();
-        output = new float[outShape[0]][outShape[1]][outShape[2]];
+        // 3. Inference (tái dùng outputBuffer)
+        interpreter.run(inputBuffer, outputBuffer);
 
-        // 4. Inference
-        interpreter.run(inputBuf, output);
+        // 4. Parse kết quả
+        List<Detection> candidates = parseOutput(outputBuffer);
 
-        // 5. Parse kết quả
-        List<Detection> candidates = parseOutput(output);
-
-        // 6. NMS để loại bỏ box trùng lặp
+        // 5. NMS để loại bỏ box trùng lặp
         return applyNMS(candidates);
     }
 
@@ -134,6 +177,9 @@ public class YoloDetector {
     public void close() {
         if (interpreter != null) {
             interpreter.close();
+        }
+        if (gpuDelegate != null) {
+            gpuDelegate.close();
         }
     }
 
@@ -150,22 +196,19 @@ public class YoloDetector {
     }
 
     // --------------------------------------------------------
-    // Private: Bitmap → ByteBuffer RGB float32 normalized [0,1]
+    // Private: Điền Bitmap → pre-allocated inputBuffer
+    // Tránh tạo mảng mới mỗi frame (dùng lại pixelBuffer)
     // --------------------------------------------------------
-    private ByteBuffer bitmapToByteBuffer(Bitmap bitmap) {
-        ByteBuffer buf = ByteBuffer.allocateDirect(1 * INPUT_SIZE * INPUT_SIZE * 3 * 4);
-        buf.order(ByteOrder.nativeOrder());
+    private void fillInputBuffer(Bitmap bitmap) {
+        inputBuffer.rewind(); // Reset position về 0 để ghi lại từ đầu
 
-        int[] pixels = new int[INPUT_SIZE * INPUT_SIZE];
-        bitmap.getPixels(pixels, 0, INPUT_SIZE, 0, 0, INPUT_SIZE, INPUT_SIZE);
+        bitmap.getPixels(pixelBuffer, 0, INPUT_SIZE, 0, 0, INPUT_SIZE, INPUT_SIZE);
 
-        for (int pixel : pixels) {
-            buf.putFloat(((pixel >> 16) & 0xFF) / 255.0f); // R
-            buf.putFloat(((pixel >> 8)  & 0xFF) / 255.0f); // G
-            buf.putFloat(( pixel        & 0xFF) / 255.0f); // B
+        for (int pixel : pixelBuffer) {
+            inputBuffer.putFloat(((pixel >> 16) & 0xFF) * (1f / 255f)); // R
+            inputBuffer.putFloat(((pixel >> 8)  & 0xFF) * (1f / 255f)); // G
+            inputBuffer.putFloat(( pixel        & 0xFF) * (1f / 255f)); // B
         }
-
-        return buf;
     }
 
     // --------------------------------------------------------
@@ -174,10 +217,9 @@ public class YoloDetector {
     private List<Detection> parseOutput(float[][][] output) {
         List<Detection> candidates = new ArrayList<>();
 
-        // Kiểm tra xem tọa độ có ở dạng pixel (0-640) hay normalized (0-1)
-        // Lấy mẫu vài giá trị để tự động phán đoán
-        float sampleCx = isTransposed ? output[0][0][0] : output[0][0][0];
-        boolean needNormalize = sampleCx > 1.5f; // Nếu > 1.5 thì là pixel space
+        // Tự động phán đoán tọa độ là pixel (0-640) hay normalized (0-1)
+        float sampleCx = output[0][0][0];
+        boolean needNormalize = sampleCx > 1.5f;
 
         for (int i = 0; i < numBoxes; i++) {
             float cx, cy, w, h;

@@ -58,14 +58,20 @@ public class MainActivity extends AppCompatActivity {
     private YoloDetector detector;
     private DrowsinessDetector drowsinessDetector;
     private ExecutorService cameraExecutor;
-    private ExecutorService yoloExecutor; // Luồng riêng biệt cho YOLO
+    private ExecutorService yoloExecutor;       // Luồng riêng biệt cho YOLO inference
 
     // Camera state
     private int lensFacing = CameraSelector.LENS_FACING_FRONT;
 
     // FPS tracking
     private long lastFrameTime = 0L;
-    private boolean isProcessing = false; // Cờ chặn chồng chéo frame
+    private boolean isProcessing = false;      // Cờ chặn chồng chéo frame
+
+    // Frame skip: YOLO chạy mỗi YOLO_SKIP_FRAMES frame (tiết kiệm tài nguyên)
+    private static final int YOLO_SKIP_FRAMES = 2;
+    private int frameCounter = 0;
+    private List<YoloDetector.Detection> lastYoloDetections = new ArrayList<>();
+
 
     // Labels
     private String[] labels;
@@ -106,11 +112,12 @@ public class MainActivity extends AppCompatActivity {
         labels = loadLabels();
 
         cameraExecutor = Executors.newSingleThreadExecutor();
-        yoloExecutor = Executors.newSingleThreadExecutor(); // Khởi tạo luồng cho YOLO
+        yoloExecutor = Executors.newSingleThreadExecutor();
         cameraExecutor.execute(() -> {
             try {
+                // Load cả 2 model trên background thread
                 drowsinessDetector = new DrowsinessDetector(this);
-                // detector = new YoloDetector(this, labels);
+                detector = new YoloDetector(this, labels);
 
                 runOnUiThread(() -> {
                     statusText.setText("Tất cả Model đã sẵn sàng!");
@@ -124,6 +131,7 @@ public class MainActivity extends AppCompatActivity {
                 });
             }
         });
+
     }
 
     private void checkAndStartCamera() {
@@ -192,30 +200,44 @@ public class MainActivity extends AppCompatActivity {
                 timestampMs = lastTimestampMs + 1;
             }
             lastTimestampMs = timestampMs;
+            frameCounter++;
 
-            // 1. Chạy YOLO nhận diện dây an toàn
-            // java.util.concurrent.Future<List<YoloDetector.Detection>> yoloFuture = yoloExecutor.submit(() -> {
-            //     return detector.detect(bitmap);
-            // });
+            // ── YOLO: submit lên yoloExecutor (song song với Drowsiness) ─────────
+            // Chỉ chạy mỗi YOLO_SKIP_FRAMES frame; frame bị skip dùng lại kết quả cũ
+            java.util.concurrent.Future<List<YoloDetector.Detection>> yoloFuture = null;
+            if (detector != null && frameCounter % YOLO_SKIP_FRAMES == 0) {
+                // Copy bitmap để YOLO dùng độc lập (tránh race condition)
+                final Bitmap yoloBitmap = bitmap.copy(bitmap.getConfig(), false);
+                yoloFuture = yoloExecutor.submit(() -> {
+                    List<YoloDetector.Detection> result = detector.detect(yoloBitmap);
+                    yoloBitmap.recycle(); // Giải phóng sau khi dùng xong
+                    return result;
+                });
+            }
 
-            // 2. Chạy MediaPipe nhận diện ngủ gật
-            DrowsinessDetector.DrowsinessResult drowsinessResult = drowsinessDetector.detect(bitmap, timestampMs);
+            // ── DrowsinessDetector: chạy trên thread hiện tại (blocking OK) ─────
+            DrowsinessDetector.DrowsinessResult drowsinessResult =
+                    drowsinessDetector.detect(bitmap, timestampMs);
 
-            // 3. Đợi YOLO chạy xong và lấy kết quả vào một danh sách có thể thay đổi (ArrayList)
-            // List<YoloDetector.Detection> seatbeltDetections = new ArrayList<>(yoloFuture.get());
-            List<YoloDetector.Detection> seatbeltDetections = new ArrayList<>();
+            // ── Lấy kết quả YOLO (đợi Future nếu đã gửi) ────────────────────────
+            if (yoloFuture != null) {
+                try {
+                    lastYoloDetections = new ArrayList<>(yoloFuture.get());
+                } catch (Exception e) {
+                    Log.w(TAG, "YOLO inference error: " + e.getMessage());
+                }
+            }
+            // Dùng kết quả YOLO mới nhất (kể cả frame bị skip)
+            List<YoloDetector.Detection> seatbeltDetections = new ArrayList<>(lastYoloDetections);
 
-            // 4. Thêm Bbox của khuôn mặt vào danh sách để hiển thị trên Overlay
+            // ── Thêm Bbox khuôn mặt vào danh sách hiển thị ──────────────────────
             if (drowsinessResult.faceDetected && drowsinessResult.faceBbox != null) {
                 String faceLabel = "Face";
                 if (drowsinessResult.isDrowsy) faceLabel = "Drowsy";
                 else if (drowsinessResult.isYawning) faceLabel = "Yawning";
 
                 seatbeltDetections.add(new YoloDetector.Detection(
-                        drowsinessResult.faceBbox,
-                        -1,
-                        1.0f,
-                        faceLabel));
+                        drowsinessResult.faceBbox, -1, 1.0f, faceLabel));
             }
 
             long now = System.currentTimeMillis();
@@ -231,6 +253,7 @@ public class MainActivity extends AppCompatActivity {
             isProcessing = false;
         }
     }
+
 
     private Bitmap imageProxyToBitmap(@NonNull ImageProxy imageProxy) {
         Bitmap bitmap = imageProxy.toBitmap();
