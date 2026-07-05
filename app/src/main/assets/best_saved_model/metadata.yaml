@@ -1,0 +1,24 @@
+description: Ultralytics best model trained on /content/dataset/data.yaml
+author: Ultralytics
+date: '2026-07-05T12:24:30.722768'
+version: 8.4.57
+license: AGPL-3.0 License (https://ultralytics.com/license)
+docs: https://docs.ultralytics.com
+stride: 32
+task: detect
+batch: 1
+imgsz:
+- 640
+- 640
+names:
+  0: no-seatbelt
+  1: seatbelt
+args:
+  data: coco8.yaml
+  batch: 1
+  fraction: 1.0
+  half: false
+  int8: true
+  nms: false
+channels: 3
+end2end: false

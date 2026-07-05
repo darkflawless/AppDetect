@@ -7,7 +7,6 @@ java {
         languageVersion.set(JavaLanguageVersion.of(21))
     }
 }
-
 android {
     namespace = "com.example.myapplication"
     // Giữ nguyên cấu hình SDK của bạn

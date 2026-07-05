@@ -54,16 +54,16 @@ public class YoloDetector {
     private static final float IOU_THRESHOLD = 0.45f;
 
     private final Interpreter interpreter;
-    private final GpuDelegate gpuDelegate;          // null nếu GPU không khả dụng
+    private final GpuDelegate gpuDelegate; // null nếu GPU không khả dụng
     private final String[] labels;
     private final int numClasses;
     private final int numBoxes;
     private final boolean isTransposed; // true nếu shape [1, 6, 8400]; false nếu [1, 8400, 6]
 
     // ── Pre-allocated buffers (tái dùng mỗi frame để tránh GC pressure) ────────
-    private final ByteBuffer inputBuffer;   // [1, 640, 640, 3] float32
+    private final ByteBuffer inputBuffer; // [1, 640, 640, 3] float32
     private final float[][][] outputBuffer; // [1][dim1][dim2]
-    private final int[] pixelBuffer;        // pixel scratch
+    private final int[] pixelBuffer; // pixel scratch
 
     // --------------------------------------------------------
     // Data class chứa kết quả 1 detection
@@ -206,8 +206,8 @@ public class YoloDetector {
 
         for (int pixel : pixelBuffer) {
             inputBuffer.putFloat(((pixel >> 16) & 0xFF) * (1f / 255f)); // R
-            inputBuffer.putFloat(((pixel >> 8)  & 0xFF) * (1f / 255f)); // G
-            inputBuffer.putFloat(( pixel        & 0xFF) * (1f / 255f)); // B
+            inputBuffer.putFloat(((pixel >> 8) & 0xFF) * (1f / 255f)); // G
+            inputBuffer.putFloat((pixel & 0xFF) * (1f / 255f)); // B
         }
     }
 
@@ -229,8 +229,8 @@ public class YoloDetector {
                 // Shape: [1, 6, 8400] → output[0][row][col]
                 cx = output[0][0][i];
                 cy = output[0][1][i];
-                w  = output[0][2][i];
-                h  = output[0][3][i];
+                w = output[0][2][i];
+                h = output[0][3][i];
                 for (int c = 0; c < numClasses; c++) {
                     classScores[c] = output[0][4 + c][i];
                 }
@@ -238,8 +238,8 @@ public class YoloDetector {
                 // Shape: [1, 8400, 6] → output[0][row][col]
                 cx = output[0][i][0];
                 cy = output[0][i][1];
-                w  = output[0][i][2];
-                h  = output[0][i][3];
+                w = output[0][i][2];
+                h = output[0][i][3];
                 for (int c = 0; c < numClasses; c++) {
                     classScores[c] = output[0][i][4 + c];
                 }
@@ -256,13 +256,14 @@ public class YoloDetector {
             }
 
             // Lọc theo ngưỡng confidence
-            if (bestScore < CONFIDENCE_THRESHOLD) continue;
+            if (bestScore < CONFIDENCE_THRESHOLD)
+                continue;
 
             // Chuyển về tọa độ normalized [0,1]
             float normCx = needNormalize ? cx / INPUT_SIZE : cx;
             float normCy = needNormalize ? cy / INPUT_SIZE : cy;
-            float normW  = needNormalize ? w  / INPUT_SIZE : w;
-            float normH  = needNormalize ? h  / INPUT_SIZE : h;
+            float normW = needNormalize ? w / INPUT_SIZE : w;
+            float normH = needNormalize ? h / INPUT_SIZE : h;
 
             // cx,cy,w,h → x1,y1,x2,y2
             float x1 = normCx - normW / 2f;
@@ -276,7 +277,8 @@ public class YoloDetector {
             x2 = Math.max(0f, Math.min(1f, x2));
             y2 = Math.max(0f, Math.min(1f, y2));
 
-            if (x2 <= x1 || y2 <= y1) continue; // box vô nghĩa
+            if (x2 <= x1 || y2 <= y1)
+                continue; // box vô nghĩa
 
             String label = (bestClass < labels.length) ? labels[bestClass] : "class_" + bestClass;
             candidates.add(new Detection(new RectF(x1, y1, x2, y2), bestClass, bestScore, label));
@@ -296,11 +298,13 @@ public class YoloDetector {
         boolean[] suppressed = new boolean[detections.size()];
 
         for (int i = 0; i < detections.size(); i++) {
-            if (suppressed[i]) continue;
+            if (suppressed[i])
+                continue;
             result.add(detections.get(i));
 
             for (int j = i + 1; j < detections.size(); j++) {
-                if (suppressed[j]) continue;
+                if (suppressed[j])
+                    continue;
                 if (computeIoU(detections.get(i).bbox, detections.get(j).bbox) >= IOU_THRESHOLD) {
                     suppressed[j] = true;
                 }
@@ -314,12 +318,13 @@ public class YoloDetector {
     // Private: Tính IoU (Intersection over Union)
     // --------------------------------------------------------
     private float computeIoU(RectF a, RectF b) {
-        float interLeft   = Math.max(a.left,   b.left);
-        float interTop    = Math.max(a.top,    b.top);
-        float interRight  = Math.min(a.right,  b.right);
+        float interLeft = Math.max(a.left, b.left);
+        float interTop = Math.max(a.top, b.top);
+        float interRight = Math.min(a.right, b.right);
         float interBottom = Math.min(a.bottom, b.bottom);
 
-        if (interRight <= interLeft || interBottom <= interTop) return 0f;
+        if (interRight <= interLeft || interBottom <= interTop)
+            return 0f;
 
         float interArea = (interRight - interLeft) * (interBottom - interTop);
         float aArea = a.width() * a.height();

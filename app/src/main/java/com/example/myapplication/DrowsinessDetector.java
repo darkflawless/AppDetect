@@ -4,6 +4,7 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.PointF;
 import android.graphics.RectF;
+import android.util.Log;
 
 import com.google.android.gms.tasks.Tasks;
 import com.google.mlkit.vision.common.InputImage;
@@ -13,26 +14,42 @@ import com.google.mlkit.vision.face.FaceDetection;
 import com.google.mlkit.vision.face.FaceDetector;
 import com.google.mlkit.vision.face.FaceDetectorOptions;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 
 /**
  * DrowsinessDetector — phát hiện ngủ gật dựa trên EAR và MAR.
  *
- * Thay thế MediaPipe FaceLandmarker bằng ML Kit Face Detection
- * (Google Play Services) để tránh lỗi 16KB ELF alignment.
+ * Kiến trúc 2 bước:
+ * Bước 1: TFLite model tự train (face_detection.tflite) → phát hiện vùng khuôn
+ * mặt (YOLO)
+ * Bước 2: ML Kit FaceDetection (CONTOUR_MODE_ALL) → trích xuất landmark contour
+ * mắt/môi
  *
  * EAR = Eye Aspect Ratio: mắt nhắm → EAR thấp
  * MAR = Mouth Aspect Ratio: miệng há → MAR cao
  */
 public class DrowsinessDetector {
 
-    public static final float EAR_THRESHOLD = 0.21f;
-    public static final float MAR_THRESHOLD = 0.5f;
-    public static final long CLOSED_EYE_TIME_THRESHOLD_MS = 3000; // 3 giây nhắm mắt = báo động
-    private static final long ALERT_PERSISTENCE_MS = 1000;         // Duy trì cảnh báo 1 giây
+    private static final String TAG = "DrowsinessDetector";
 
-    private final FaceDetector faceDetector;
+    public static final float EAR_THRESHOLD = 0.21f;
+    public static final float MAR_THRESHOLD = 0.7f;
+    public static final long CLOSED_EYE_TIME_THRESHOLD_MS = 3000; // 3 giây nhắm mắt = báo động
+    private static final long ALERT_PERSISTENCE_MS = 1000; // Duy trì cảnh báo 1 giây
+
+    // Padding thêm khi crop khuôn mặt cho ML Kit
+    // Chiều ngang mở rộng 50% (để lấy hết 2 bên má/tai)
+    private static final float FACE_CROP_PADDING_X = 0.25f;
+
+    // Bước 1: TFLite YOLO face detector (model tự train)
+    private final TFLiteFaceDetector tfliteDetector;
+
+    // Bước 2: ML Kit chỉ dùng để lấy contour landmark (không dùng để detect mặt
+    // nữa)
+    private final FaceDetector mlkitDetector;
+
     private long firstClosedEyeTime = 0;
     private long lastDrowsyTime = 0;
 
@@ -52,14 +69,18 @@ public class DrowsinessDetector {
     // -------------------------------------------------------------------------
     // Khởi tạo
     // -------------------------------------------------------------------------
-    public DrowsinessDetector(Context context) {
+    public DrowsinessDetector(Context context) throws IOException {
+        // Bước 1: load TFLite face detector
+        tfliteDetector = new TFLiteFaceDetector(context);
+
+        // Bước 2: ML Kit chỉ cần CONTOUR_MODE_ALL để lấy landmark điểm mắt/môi.
+        // minFaceSize = 0.5f vì ảnh crop đã có mặt chiếm phần lớn khung hình.
         FaceDetectorOptions options = new FaceDetectorOptions.Builder()
                 .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
-                .setContourMode(FaceDetectorOptions.CONTOUR_MODE_ALL) // Lấy contour mắt + môi
-                .setMinFaceSize(0.15f)                                  // Bỏ qua mặt quá nhỏ
+                .setContourMode(FaceDetectorOptions.CONTOUR_MODE_ALL)
+                .setMinFaceSize(0.5f)
                 .build();
-
-        faceDetector = FaceDetection.getClient(options);
+        mlkitDetector = FaceDetection.getClient(options);
     }
 
     // -------------------------------------------------------------------------
@@ -69,50 +90,59 @@ public class DrowsinessDetector {
         DrowsinessResult result = new DrowsinessResult();
 
         try {
-            InputImage inputImage = InputImage.fromBitmap(bitmap, 0);
+            // ── Bước 1: TFLite detect khuôn mặt ──────────────────────────────
+            RectF faceBbox = tfliteDetector.detectBestFace(bitmap);
 
-            // Tasks.await() dùng OK vì đang trên background thread
-            List<Face> faces = Tasks.await(faceDetector.process(inputImage));
-
-            if (faces.isEmpty()) {
+            if (faceBbox == null) {
+                // Không tìm thấy mặt → reset timer, giữ cảnh báo persistence nếu còn hiệu lực
                 firstClosedEyeTime = 0;
                 result.isDrowsy = (System.currentTimeMillis() - lastDrowsyTime < ALERT_PERSISTENCE_MS);
                 return result;
             }
 
-            Face face = faces.get(0);
+            // Tính box đã thêm padding để hiển thị lên màn hình cho bạn dễ hình dung
+            float padX = (faceBbox.right - faceBbox.left) * FACE_CROP_PADDING_X;
+            RectF paddedBbox = new RectF(
+                    Math.max(0f, faceBbox.left - padX),
+                    faceBbox.top,
+                    Math.min(1f, faceBbox.right + padX),
+                    faceBbox.bottom);
+
             result.faceDetected = true;
+            result.faceBbox = paddedBbox; // Gửi box đã padding ra UI để vẽ khung
 
-            // Bounding box khuôn mặt (normalize về [0,1])
-            android.graphics.Rect bbox = face.getBoundingBox();
-            float imgW = bitmap.getWidth();
-            float imgH = bitmap.getHeight();
-            result.faceBbox = new RectF(
-                    Math.max(0f, bbox.left   / imgW),
-                    Math.max(0f, bbox.top    / imgH),
-                    Math.min(1f, bbox.right  / imgW),
-                    Math.min(1f, bbox.bottom / imgH)
-            );
+            // ── Bước 2: Crop khuôn mặt (có padding) để đưa vào ML Kit ────────
+            Bitmap faceCrop = cropFace(bitmap, faceBbox);
 
-            // --- Tính EAR từ contour mắt ---
-            FaceContour leftEyeContour  = face.getContour(FaceContour.LEFT_EYE);
-            FaceContour rightEyeContour = face.getContour(FaceContour.RIGHT_EYE);
+            // ── Bước 3: ML Kit lấy contour landmark trên ảnh crop ────────────
+            InputImage inputImage = InputImage.fromBitmap(faceCrop, 0);
+            List<Face> faces = Tasks.await(mlkitDetector.process(inputImage));
 
-            if (leftEyeContour != null && rightEyeContour != null) {
-                float leftEar  = calcEar(leftEyeContour.getPoints());
-                float rightEar = calcEar(rightEyeContour.getPoints());
-                result.ear = (leftEar + rightEar) / 2.0f;
+            if (!faces.isEmpty()) {
+                Face face = faces.get(0);
+
+                // --- Tính EAR từ contour mắt ---
+                FaceContour leftEyeContour = face.getContour(FaceContour.LEFT_EYE);
+                FaceContour rightEyeContour = face.getContour(FaceContour.RIGHT_EYE);
+                if (leftEyeContour != null && rightEyeContour != null) {
+                    float leftEar = calcEar(leftEyeContour.getPoints());
+                    float rightEar = calcEar(rightEyeContour.getPoints());
+                    result.ear = (leftEar + rightEar) / 2.0f;
+                }
+
+                // --- Tính MAR từ contour môi ---
+                FaceContour upperLipTop = face.getContour(FaceContour.UPPER_LIP_TOP);
+                FaceContour lowerLipBottom = face.getContour(FaceContour.LOWER_LIP_BOTTOM);
+                if (upperLipTop != null && lowerLipBottom != null) {
+                    result.mar = calcMar(upperLipTop.getPoints(), lowerLipBottom.getPoints());
+                }
+            } else {
+                // ML Kit không thấy contour trong crop → dùng EAR mặc định (mắt mở)
+                Log.d(TAG, "ML Kit: không tìm thấy contour trong crop");
+                result.ear = 0.3f;
             }
 
-            // --- Tính MAR từ contour môi ---
-            FaceContour upperLipTop    = face.getContour(FaceContour.UPPER_LIP_TOP);
-            FaceContour lowerLipBottom = face.getContour(FaceContour.LOWER_LIP_BOTTOM);
-
-            if (upperLipTop != null && lowerLipBottom != null) {
-                result.mar = calcMar(upperLipTop.getPoints(), lowerLipBottom.getPoints());
-            }
-
-            // --- Logic cảnh báo ngủ gật ---
+            // ── Logic cảnh báo ngủ gật ────────────────────────────────────────
             if (result.ear < EAR_THRESHOLD) {
                 if (firstClosedEyeTime == 0) {
                     firstClosedEyeTime = System.currentTimeMillis();
@@ -122,7 +152,8 @@ public class DrowsinessDetector {
             }
 
             long currentClosedDuration = (firstClosedEyeTime > 0)
-                    ? (System.currentTimeMillis() - firstClosedEyeTime) : 0;
+                    ? (System.currentTimeMillis() - firstClosedEyeTime)
+                    : 0;
 
             if (currentClosedDuration >= CLOSED_EYE_TIME_THRESHOLD_MS) {
                 lastDrowsyTime = System.currentTimeMillis();
@@ -135,56 +166,86 @@ public class DrowsinessDetector {
 
         } catch (ExecutionException | InterruptedException e) {
             // Nếu lỗi inference, trả về result mặc định (không crash app)
+            Log.e(TAG, "Lỗi xử lý: " + e.getMessage());
         }
 
         return result;
     }
 
     // -------------------------------------------------------------------------
+    // Crop khuôn mặt từ bitmap gốc + padding để ML Kit không bị cắt viền
+    // faceBbox: normalized [0,1] từ TFLite
+    // -------------------------------------------------------------------------
+    private Bitmap cropFace(Bitmap bitmap, RectF bbox) {
+        int imgW = bitmap.getWidth();
+        int imgH = bitmap.getHeight();
+
+        // Tính padding theo tỷ lệ kích thước box
+        float padX = (bbox.right - bbox.left) * FACE_CROP_PADDING_X;
+
+        int x1 = (int) Math.max(0, (bbox.left - padX) * imgW);
+        int y1 = (int) Math.max(0, bbox.top * imgH);
+        int x2 = (int) Math.min(imgW, (bbox.right + padX) * imgW);
+        int y2 = (int) Math.min(imgH, bbox.bottom * imgH);
+
+        int cropW = x2 - x1;
+        int cropH = y2 - y1;
+
+        if (cropW <= 0 || cropH <= 0)
+            return bitmap; // fallback: toàn ảnh
+
+        return Bitmap.createBitmap(bitmap, x1, y1, cropW, cropH);
+    }
+
+    // -------------------------------------------------------------------------
     // EAR — Eye Aspect Ratio
     // ML Kit trả về 16 điểm cho mỗi mắt, đi theo chiều kim đồng hồ:
-    //   p[0]  = góc ngoài
-    //   p[4]  = đỉnh trên
-    //   p[8]  = góc trong
-    //   p[12] = đỉnh dưới
+    // p[0] = góc ngoài
+    // p[4] = đỉnh trên
+    // p[8] = góc trong
+    // p[12] = đỉnh dưới
     //
     // EAR = (A + B) / (2 * C)
-    //   A = khoảng cách dọc tại 1/4 từ ngoài vào  (p[2]  <-> p[14])
-    //   B = khoảng cách dọc ở giữa mắt             (p[4]  <-> p[12])
-    //   C = khoảng cách ngang (chiều rộng mắt)      (p[0]  <-> p[8])
+    // A = khoảng cách dọc tại 1/4 từ ngoài vào (p[2] <-> p[14])
+    // B = khoảng cách dọc ở giữa mắt (p[4] <-> p[12])
+    // C = khoảng cách ngang (chiều rộng mắt) (p[0] <-> p[8])
     // -------------------------------------------------------------------------
     private float calcEar(List<PointF> pts) {
-        if (pts == null || pts.size() < 16) return 0.3f; // mặt định: mắt mở
+        if (pts == null || pts.size() < 16)
+            return 0.3f; // mặt định: mắt mở
 
-        float A = dist(pts.get(2),  pts.get(14));
-        float B = dist(pts.get(4),  pts.get(12));
-        float C = dist(pts.get(0),  pts.get(8));
+        float A = dist(pts.get(2), pts.get(14));
+        float B = dist(pts.get(4), pts.get(12));
+        float C = dist(pts.get(0), pts.get(8));
 
-        if (C < 1f) return 0.3f;
+        if (C < 1f)
+            return 0.3f;
         return (A + B) / (2.0f * C);
     }
 
     // -------------------------------------------------------------------------
     // MAR — Mouth Aspect Ratio
     // upperLipTop: đường viền trên của môi trên (thường ~13 điểm)
-    //   p[0]      = góc trái miệng
-    //   p[mid]    = điểm giữa trên
-    //   p[last]   = góc phải miệng
+    // p[0] = góc trái miệng
+    // p[mid] = điểm giữa trên
+    // p[last] = góc phải miệng
     // lowerLipBottom: đường viền dưới của môi dưới (thường ~13 điểm)
-    //   p[mid]    = điểm giữa dưới
+    // p[mid] = điểm giữa dưới
     //
     // MAR = khoảng dọc (trên-dưới) / khoảng ngang (trái-phải)
     // -------------------------------------------------------------------------
     private float calcMar(List<PointF> upper, List<PointF> lower) {
-        if (upper == null || lower == null || upper.size() < 3 || lower.size() < 3) return 0f;
+        if (upper == null || lower == null || upper.size() < 3 || lower.size() < 3)
+            return 0f;
 
         int uMid = upper.size() / 2;
         int lMid = lower.size() / 2;
 
-        float vertical   = dist(upper.get(uMid), lower.get(lMid));
+        float vertical = dist(upper.get(uMid), lower.get(lMid));
         float horizontal = dist(upper.get(0), upper.get(upper.size() - 1));
 
-        if (horizontal < 1f) return 0f;
+        if (horizontal < 1f)
+            return 0f;
         return vertical / horizontal;
     }
 
@@ -201,8 +262,9 @@ public class DrowsinessDetector {
     // Dọn dẹp tài nguyên
     // -------------------------------------------------------------------------
     public void close() {
-        if (faceDetector != null) {
-            faceDetector.close();
-        }
+        if (tfliteDetector != null)
+            tfliteDetector.close();
+        if (mlkitDetector != null)
+            mlkitDetector.close();
     }
 }
