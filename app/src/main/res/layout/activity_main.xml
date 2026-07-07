@@ -115,4 +115,41 @@
             android:gravity="center" />
     </LinearLayout>
 
+    <!-- Lớp phủ nút Bắt đầu hành trình -->
+    <LinearLayout
+        android:id="@+id/start_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#CC000000"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:visibility="visible">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Xác thực thành công!"
+            android:textColor="#4CAF50"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="24dp"/>
+
+        <Button
+            android:id="@+id/btn_start_trip"
+            android:layout_width="240dp"
+            android:layout_height="64dp"
+            android:text="BẮT ĐẦU HÀNH TRÌNH"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:backgroundTint="#2196F3"
+            android:textColor="#FFFFFF" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Nhấn để bắt đầu giám sát an toàn"
+            android:textColor="#AAAAAA"
+            android:layout_marginTop="16dp"/>
+    </LinearLayout>
+
 </FrameLayout>

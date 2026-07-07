@@ -11,7 +11,9 @@ import android.graphics.Rect;
 import android.graphics.YuvImage;
 import android.os.Bundle;
 import android.util.Log;
+import android.widget.Button;
 import android.widget.ImageButton;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -54,6 +56,10 @@ public class MainActivity extends AppCompatActivity {
     private TextView fpsText;
     private ImageButton btnSwitchCamera;
 
+    // Start Trip UI
+    private LinearLayout startOverlay;
+    private Button btnStartTrip;
+
     // Detector + Threading
     private YoloDetector detector;
     private DrowsinessDetector drowsinessDetector;
@@ -62,6 +68,7 @@ public class MainActivity extends AppCompatActivity {
 
     // Camera state
     private int lensFacing = CameraSelector.LENS_FACING_FRONT;
+    private boolean isTripStarted = false;
 
     // FPS tracking
     private long lastFrameTime = 0L;
@@ -101,18 +108,30 @@ public class MainActivity extends AppCompatActivity {
         confidenceText = findViewById(R.id.confidence_text);
         fpsText = findViewById(R.id.fps_text);
         btnSwitchCamera = findViewById(R.id.btn_switch_camera);
+        
+        // Start Trip views
+        startOverlay = findViewById(R.id.start_overlay);
+        btnStartTrip = findViewById(R.id.btn_start_trip);
 
         btnSwitchCamera.setOnClickListener(v -> {
             lensFacing = (lensFacing == CameraSelector.LENS_FACING_BACK)
                     ? CameraSelector.LENS_FACING_FRONT
                     : CameraSelector.LENS_FACING_BACK;
-            startCamera();
+            if (isTripStarted) startCamera();
+        });
+
+        btnStartTrip.setOnClickListener(v -> {
+            isTripStarted = true;
+            startOverlay.setVisibility(android.view.View.GONE);
+            checkAndStartCamera();
         });
 
         labels = loadLabels();
 
         cameraExecutor = Executors.newSingleThreadExecutor();
         yoloExecutor = Executors.newSingleThreadExecutor();
+        
+        // Load model trước để sẵn sàng
         cameraExecutor.execute(() -> {
             try {
                 // Load cả 2 model trên background thread
@@ -120,8 +139,8 @@ public class MainActivity extends AppCompatActivity {
                 detector = new YoloDetector(this, labels);
 
                 runOnUiThread(() -> {
-                    statusText.setText("Tất cả Model đã sẵn sàng!");
-                    checkAndStartCamera();
+                    btnStartTrip.setEnabled(true);
+                    Log.d(TAG, "Models loaded and ready");
                 });
             } catch (Exception e) {
                 Log.e(TAG, "Failed to load models", e);
@@ -131,7 +150,6 @@ public class MainActivity extends AppCompatActivity {
                 });
             }
         });
-
     }
 
     private void checkAndStartCamera() {
