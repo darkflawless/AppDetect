@@ -56,6 +56,10 @@ public class TFLiteFaceDetector {
     private final float[][][] outputBuffer; // [1][dim1][dim2]
     private final int[] pixelBuffer; // pixel scratch
 
+    // IoU Tracking variables
+    private RectF lastDriverBbox = null;
+    private static final float IOU_TRACKING_THRESHOLD = 0.2f;
+
     // -------------------------------------------------------------------------
     // Data class: kết quả 1 detection khuôn mặt
     // -------------------------------------------------------------------------
@@ -127,14 +131,56 @@ public class TFLiteFaceDetector {
     }
 
     // -------------------------------------------------------------------------
-    // detectBestFace: trả về bounding box của khuôn mặt có confidence cao nhất.
-    // @return RectF normalized [0,1] hoặc null nếu không tìm thấy mặt.
+    // detectBestFace: trả về bounding box của tài xế (dùng IoU Tracking).
+    // @return RectF normalized [0,1] hoặc null nếu mất dấu tài xế.
     // -------------------------------------------------------------------------
+    public void resetTracker() {
+        lastDriverBbox = null;
+    }
+
     public RectF detectBestFace(Bitmap bitmap) {
         List<FaceBox> faces = detect(bitmap);
         if (faces.isEmpty())
             return null;
-        return faces.get(0).bbox; // Đã sort theo confidence giảm dần
+
+        if (lastDriverBbox == null) {
+            // BƯỚC 1 (Init): Tìm khuôn mặt có diện tích Bounding Box lớn nhất (Tài xế)
+            RectF largestFace = faces.get(0).bbox;
+            float maxArea = largestFace.width() * largestFace.height();
+
+            for (int i = 1; i < faces.size(); i++) {
+                RectF currentFace = faces.get(i).bbox;
+                float currentArea = currentFace.width() * currentFace.height();
+                if (currentArea > maxArea) {
+                    maxArea = currentArea;
+                    largestFace = currentFace;
+                }
+            }
+            lastDriverBbox = largestFace;
+            return largestFace;
+        } else {
+            // BƯỚC 2 (Track): Tìm khuôn mặt trùng khớp với vị trí cũ nhất
+            RectF bestTrackedFace = null;
+            float bestIoU = -1f;
+
+            for (FaceBox f : faces) {
+                float iou = computeIoU(f.bbox, lastDriverBbox);
+                if (iou > bestIoU) {
+                    bestIoU = iou;
+                    bestTrackedFace = f.bbox;
+                }
+            }
+
+            // Nếu độ trùng khớp đủ lớn -> Cập nhật vị trí
+            if (bestIoU > IOU_TRACKING_THRESHOLD && bestTrackedFace != null) {
+                lastDriverBbox = bestTrackedFace;
+                return bestTrackedFace;
+            } else {
+                // Không tìm thấy ai ở vị trí ghế lái (Tài xế đã gục hoặc rời đi)
+                // Lưu ý: KHÔNG resetTracker ở đây, để DrowsinessDetector quyết định
+                return null;
+            }
+        }
     }
 
     // -------------------------------------------------------------------------

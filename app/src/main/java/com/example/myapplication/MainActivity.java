@@ -234,6 +234,7 @@ public class MainActivity extends AppCompatActivity {
             if (drowsinessResult.faceDetected && drowsinessResult.faceBbox != null) {
                 String faceLabel = "Face";
                 if (drowsinessResult.isDrowsy) faceLabel = "Drowsy";
+                else if (drowsinessResult.isDistracted) faceLabel = "Distracted";
                 else if (drowsinessResult.isYawning) faceLabel = "Yawning";
 
                 seatbeltDetections.add(new YoloDetector.Detection(
@@ -289,12 +290,24 @@ public class MainActivity extends AppCompatActivity {
         }
 
         // Logic hiển thị (Ưu tiên các cảnh báo nguy hiểm trước)
-        if (dResult.faceDetected && dResult.isDrowsy) {
+        if (dResult.isFaceMissing) {
+            redFlashOverlay.setVisibility(android.view.View.VISIBLE);
+            statusIcon.setText("🫥");
+            statusText.setText("CẢNH BÁO - KHÔNG THẤY TÀI XẾ!");
+            statusText.setTextColor(Color.RED);
+            confidenceText.setText("Hệ thống mất dấu người lái!");
+        } else if (dResult.faceDetected && dResult.isDrowsy) {
             redFlashOverlay.setVisibility(android.view.View.VISIBLE);
             statusIcon.setText("😴");
             statusText.setText("NGUY HIỂM - ĐANG NGỦ GẬT!");
             statusText.setTextColor(Color.RED);
             confidenceText.setText(String.format("Hãy dừng xe! (EAR: %.2f)", dResult.ear));
+        } else if (dResult.faceDetected && dResult.isDistracted) {
+            redFlashOverlay.setVisibility(android.view.View.VISIBLE);
+            statusIcon.setText("🫣");
+            statusText.setText("CẢNH BÁO - MẤT TẬP TRUNG!");
+            statusText.setTextColor(Color.RED);
+            confidenceText.setText(String.format("Hãy nhìn thẳng! (Góc quay: %.0f°)", dResult.headEulerY));
         } else {
             redFlashOverlay.setVisibility(android.view.View.GONE);
 
@@ -319,9 +332,9 @@ public class MainActivity extends AppCompatActivity {
                 statusText.setTextColor(Color.WHITE);
 
                 if (dResult.faceDetected) {
-                    // Hiện EAR và thời gian nhắm mắt ra màn hình để theo dõi trực tiếp
-                    confidenceText.setText(String.format("EAR: %.2f (Nhắm mắt: %dms/3000ms)",
-                            dResult.ear, dResult.closedEyeDurationMs));
+                    // Hiện trạng thái bình thường
+                    confidenceText.setText(String.format("EAR: %.2f | Yaw: %.0f°",
+                            dResult.ear, dResult.headEulerY));
                 } else {
                     confidenceText.setText("");
                 }

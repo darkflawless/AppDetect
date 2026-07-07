@@ -37,6 +37,9 @@ public class DrowsinessDetector {
     public static final float EAR_THRESHOLD = 0.21f;
     public static final float MAR_THRESHOLD = 0.7f;
     public static final long CLOSED_EYE_TIME_THRESHOLD_MS = 3000; // 3 giây nhắm mắt = báo động
+    public static final float DISTRACTION_YAW_THRESHOLD = 30.0f; // Góc quay đầu > 30 độ
+    public static final long DISTRACTION_TIME_THRESHOLD_MS = 3000; // Quay đầu 3 giây = báo động
+    public static final long FACE_MISSING_TIME_THRESHOLD_MS = 3000; // Mất mặt 3 giây = báo động
     private static final long ALERT_PERSISTENCE_MS = 1000; // Duy trì cảnh báo 1 giây
 
     // Padding thêm khi crop khuôn mặt cho ML Kit
@@ -52,6 +55,11 @@ public class DrowsinessDetector {
 
     private long firstClosedEyeTime = 0;
     private long lastDrowsyTime = 0;
+    
+    private long firstDistractedTime = 0;
+    private long lastDistractedTime = 0;
+    
+    private long firstFaceMissingTime = 0;
 
     // -------------------------------------------------------------------------
     // Kết quả trả về cho MainActivity
@@ -62,7 +70,11 @@ public class DrowsinessDetector {
         public boolean isYawning = false;
         public float ear = 0f;
         public float mar = 0f;
+        public float headEulerY = 0f;
+        public boolean isDistracted = false;
+        public boolean isFaceMissing = false;
         public long closedEyeDurationMs = 0;
+        public long distractedDurationMs = 0;
         public RectF faceBbox = null;
     }
 
@@ -94,10 +106,27 @@ public class DrowsinessDetector {
             RectF faceBbox = tfliteDetector.detectBestFace(bitmap);
 
             if (faceBbox == null) {
-                // Không tìm thấy mặt → reset timer, giữ cảnh báo persistence nếu còn hiệu lực
+                // Không tìm thấy mặt ở vị trí ghế lái -> Tăng bộ đếm Face Missing
+                if (firstFaceMissingTime == 0) {
+                    firstFaceMissingTime = System.currentTimeMillis();
+                }
+                long missingDuration = System.currentTimeMillis() - firstFaceMissingTime;
+                
+                if (missingDuration >= FACE_MISSING_TIME_THRESHOLD_MS) {
+                    result.isFaceMissing = true;
+                    // Báo động xong thì reset tracker để frame sau nó tự quét tìm mặt to nhất lại từ đầu
+                    tfliteDetector.resetTracker(); 
+                }
+
+                // Không tìm thấy mặt → reset timer buồn ngủ/mất tập trung, giữ cảnh báo persistence nếu còn hiệu lực
                 firstClosedEyeTime = 0;
+                firstDistractedTime = 0;
                 result.isDrowsy = (System.currentTimeMillis() - lastDrowsyTime < ALERT_PERSISTENCE_MS);
+                result.isDistracted = (System.currentTimeMillis() - lastDistractedTime < ALERT_PERSISTENCE_MS);
                 return result;
+            } else {
+                // Tìm thấy mặt -> reset timer Face Missing
+                firstFaceMissingTime = 0;
             }
 
             // Tính box đã thêm padding để hiển thị lên màn hình cho bạn dễ hình dung
@@ -136,10 +165,14 @@ public class DrowsinessDetector {
                 if (upperLipTop != null && lowerLipBottom != null) {
                     result.mar = calcMar(upperLipTop.getPoints(), lowerLipBottom.getPoints());
                 }
+                // --- Lấy góc quay của đầu (Yaw) ---
+                result.headEulerY = face.getHeadEulerAngleY();
+                
             } else {
                 // ML Kit không thấy contour trong crop → dùng EAR mặc định (mắt mở)
                 Log.d(TAG, "ML Kit: không tìm thấy contour trong crop");
                 result.ear = 0.3f;
+                result.headEulerY = 0f;
             }
 
             // ── Logic cảnh báo ngủ gật ────────────────────────────────────────
@@ -163,6 +196,27 @@ public class DrowsinessDetector {
             result.isDrowsy = (currentClosedDuration >= CLOSED_EYE_TIME_THRESHOLD_MS)
                     || (System.currentTimeMillis() - lastDrowsyTime < ALERT_PERSISTENCE_MS);
             result.isYawning = (result.mar > MAR_THRESHOLD);
+
+            // ── Logic cảnh báo mất tập trung (Distraction) ────────────────────
+            if (Math.abs(result.headEulerY) > DISTRACTION_YAW_THRESHOLD) {
+                if (firstDistractedTime == 0) {
+                    firstDistractedTime = System.currentTimeMillis();
+                }
+            } else {
+                firstDistractedTime = 0;
+            }
+
+            long currentDistractedDuration = (firstDistractedTime > 0)
+                    ? (System.currentTimeMillis() - firstDistractedTime)
+                    : 0;
+
+            if (currentDistractedDuration >= DISTRACTION_TIME_THRESHOLD_MS) {
+                lastDistractedTime = System.currentTimeMillis();
+            }
+
+            result.distractedDurationMs = currentDistractedDuration;
+            result.isDistracted = (currentDistractedDuration >= DISTRACTION_TIME_THRESHOLD_MS)
+                    || (System.currentTimeMillis() - lastDistractedTime < ALERT_PERSISTENCE_MS);
 
         } catch (ExecutionException | InterruptedException e) {
             // Nếu lỗi inference, trả về result mặc định (không crash app)
