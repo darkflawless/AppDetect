@@ -9,14 +9,16 @@
 
 ## Bước 2: Cập nhật IP trong Code Android
 1.a Mở file: `app/src/main/java/com/example/myapplication/DriverVerifyActivity.java`
-1.b Mở file res/xml/network_security_config.xml
+
+1.b Mở file `res/xml/network_security_config.xml`
+
 2.a Tìm dòng code định nghĩa `BASE_URL` (thường ở gần đầu file):
    ```java
    private static final String BASE_URL = "http://192.168.x.x:8000";
    ```
    
-2.b thay đổi trong file .xml thành địa chỉ IP máy tính của bạn:
-ví dụ <domain includeSubdomains="true">192.168.x.x</domain>
+2.b tìm dòng code **<domain includeSubdomains="true">192.168.x.x</domain>**
+
 3. Thay đổi `192.168.x.x` thành địa chỉ IPv4 bạn vừa tìm được ở Bước 1.
    *Ví dụ:* `private static final String BASE_URL = "http://192.168.1.15:8000";`
 4. Lưu file và chạy lại ứng dụng (Build & Run).
@@ -28,7 +30,7 @@ Lệnh chạy server nên là:
 ```bash
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
-(bước 3 này được chạy bên coreAI, hướng dẫn run server sẽ bên readme bên đó)
+**(bước 3 này được chạy bên coreAI, hướng dẫn run server sẽ bên readme bên đó)**
 ## Kiểm tra kết nối
 * Đảm bảo điện thoại **không** dùng 4G/5G khi đang test nội bộ.
 * Đảm bảo Firewall (tường lửa) trên máy tính không chặn cổng `8000`.
