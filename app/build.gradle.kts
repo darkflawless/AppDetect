@@ -75,6 +75,11 @@ dependencies {
     implementation(libs.mlkit.face.detection)
     implementation(libs.mlkit.pose.detection)
 
+    // Networking
+    implementation(libs.okhttp)
+    implementation(libs.okhttp.logging)
+    implementation(libs.gson)
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.espresso.core)
     androidTestImplementation(libs.ext.junit)

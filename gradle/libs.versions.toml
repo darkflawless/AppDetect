@@ -12,6 +12,8 @@ litert = "1.4.2"           # LiteRT V1 — hỗ trợ GPU Delegate với Interpr
 litert-gpu = "1.4.2"      # GPU Delegate — phải cùng version với litert core
 mlkitFaceDetection = "17.1.0" # ML Kit thay thế MediaPipe, không có .so trong APK
 mlkitPoseDetection = "18.0.0-beta3"  # Pose Detection cho Calibration phase
+okhttp = "4.12.0"
+gson = "2.10.1"
 
 [libraries]
 junit = { group = "junit", name = "junit", version.ref = "junit" }
@@ -36,6 +38,11 @@ litert-gpu-api = { group = "com.google.ai.edge.litert", name = "litert-gpu-api",
 # ML Kit Face Detection (dùng Google Play Services, không bundle .so vào APK)
 mlkit-face-detection = { group = "com.google.android.gms", name = "play-services-mlkit-face-detection", version.ref = "mlkitFaceDetection" }
 mlkit-pose-detection = { group = "com.google.mlkit", name = "pose-detection", version.ref = "mlkitPoseDetection" }
+
+# Networking
+okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+okhttp-logging = { group = "com.squareup.okhttp3", name = "logging-interceptor", version.ref = "okhttp" }
+gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
