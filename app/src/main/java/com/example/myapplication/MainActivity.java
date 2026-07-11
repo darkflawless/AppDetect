@@ -11,7 +11,9 @@ import android.graphics.Rect;
 import android.graphics.YuvImage;
 import android.os.Bundle;
 import android.util.Log;
+import android.widget.Button;
 import android.widget.ImageButton;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -40,6 +42,9 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+// Calibration phase dùng TFLite face_detection.tflite (không cần ML Kit)
+import android.graphics.RectF;
+
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "AppDetectMain";
@@ -54,24 +59,39 @@ public class MainActivity extends AppCompatActivity {
     private TextView fpsText;
     private ImageButton btnSwitchCamera;
 
+    // Start Trip UI
+    private LinearLayout startOverlay;
+    private Button btnStartTrip;
+
     // Detector + Threading
     private YoloDetector detector;
     private DrowsinessDetector drowsinessDetector;
     private ExecutorService cameraExecutor;
-    private ExecutorService yoloExecutor;       // Luồng riêng biệt cho YOLO inference
+    private ExecutorService yoloExecutor; // Luồng riêng biệt cho YOLO inference
 
     // Camera state
     private int lensFacing = CameraSelector.LENS_FACING_FRONT;
+    private boolean isTripStarted = false;
 
     // FPS tracking
     private long lastFrameTime = 0L;
-    private boolean isProcessing = false;      // Cờ chặn chồng chéo frame
+    private boolean isProcessing = false; // Cờ chặn chồng chéo frame
 
     // Frame skip: YOLO chạy mỗi YOLO_SKIP_FRAMES frame (tiết kiệm tài nguyên)
     private static final int YOLO_SKIP_FRAMES = 2;
     private int frameCounter = 0;
     private List<YoloDetector.Detection> lastYoloDetections = new ArrayList<>();
 
+    // ── Calibration: quét cabin 5 giây đầu để xác định vị trí từng người ──────────
+    private static final long  CALIBRATION_DURATION_MS   = 5000L;  // 5 giây
+    private static final float POSE_CONFIDENCE_THRESHOLD = 0.5f;
+    private static final float NMS_IOU_THRESHOLD         = 0.45f;
+
+    private boolean isCalibrating      = false;
+    private long    calibrationStartTime = 0L;
+    private final List<List<RectF>> accumulatedRegions = new ArrayList<>(); // tích lũy trong 5s
+    private final List<RectF>       seatRegions        = new ArrayList<>(); // vùng ghế cuối cùng
+    // faceDetector đã bị loại bỏ — Calibration dùng TFLiteFaceDetector từ drowsinessDetector
 
     // Labels
     private String[] labels;
@@ -102,26 +122,42 @@ public class MainActivity extends AppCompatActivity {
         fpsText = findViewById(R.id.fps_text);
         btnSwitchCamera = findViewById(R.id.btn_switch_camera);
 
+        // Start Trip views
+        startOverlay = findViewById(R.id.start_overlay);
+        btnStartTrip = findViewById(R.id.btn_start_trip);
+
         btnSwitchCamera.setOnClickListener(v -> {
             lensFacing = (lensFacing == CameraSelector.LENS_FACING_BACK)
                     ? CameraSelector.LENS_FACING_FRONT
                     : CameraSelector.LENS_FACING_BACK;
-            startCamera();
+            if (isTripStarted)
+                startCamera();
+        });
+
+        btnStartTrip.setOnClickListener(v -> {
+            isTripStarted = true;
+            startOverlay.setVisibility(android.view.View.GONE);
+            startCalibration();      // Bắt đầu quét cabin 5 giây
+            checkAndStartCamera();
         });
 
         labels = loadLabels();
 
         cameraExecutor = Executors.newSingleThreadExecutor();
         yoloExecutor = Executors.newSingleThreadExecutor();
+
+        // Load model trước để sẵn sàng
         cameraExecutor.execute(() -> {
             try {
                 // Load cả 2 model trên background thread
                 drowsinessDetector = new DrowsinessDetector(this);
                 detector = new YoloDetector(this, labels);
+                // Calibration phase tái sử dụng TFLiteFaceDetector bên trong drowsinessDetector
+                // → không cần khởi tạo thêm ML Kit FaceDetector nữa
 
                 runOnUiThread(() -> {
-                    statusText.setText("Tất cả Model đã sẵn sàng!");
-                    checkAndStartCamera();
+                    btnStartTrip.setEnabled(true);
+                    Log.d(TAG, "Models loaded and ready");
                 });
             } catch (Exception e) {
                 Log.e(TAG, "Failed to load models", e);
@@ -131,7 +167,6 @@ public class MainActivity extends AppCompatActivity {
                 });
             }
         });
-
     }
 
     private void checkAndStartCamera() {
@@ -202,24 +237,50 @@ public class MainActivity extends AppCompatActivity {
             lastTimestampMs = timestampMs;
             frameCounter++;
 
-            // ── YOLO: submit lên yoloExecutor (song song với Drowsiness) ─────────
-            // Chỉ chạy mỗi YOLO_SKIP_FRAMES frame; frame bị skip dùng lại kết quả cũ
+            // ── CALIBRATION PHASE ─────────────────────────────────────────────
+            // 5 giây đầu: dùng PoseDetector tìm tất cả người, tích lũy vùng ghế
+            if (isCalibrating) {
+                processCalibrationFrame(bitmap);
+                DrowsinessDetector.DrowsinessResult dCal = drowsinessDetector.detect(bitmap, timestampMs);
+                long nowCal = System.currentTimeMillis();
+                float fpsCal = (lastFrameTime > 0) ? 1000f / (nowCal - lastFrameTime) : 0f;
+                lastFrameTime = nowCal;
+                List<YoloDetector.Detection> faceOnly = new ArrayList<>();
+                if (dCal.faceDetected && dCal.faceBbox != null)
+                    faceOnly.add(new YoloDetector.Detection(dCal.faceBbox, -1, 1.0f, "Face"));
+                runOnUiThread(() -> updateUI(faceOnly, dCal, fpsCal));
+                return; // finally vẫn chạy: imageProxy.close() + isProcessing = false
+            }
+
+            // ── MONITORING PHASE: YOLO detect trên vùng ghế đã calibrate ──────────
             java.util.concurrent.Future<List<YoloDetector.Detection>> yoloFuture = null;
             if (detector != null && frameCounter % YOLO_SKIP_FRAMES == 0) {
-                // Copy bitmap để YOLO dùng độc lập (tránh race condition)
                 final Bitmap yoloBitmap = bitmap.copy(bitmap.getConfig(), false);
+                final List<RectF> regions = new ArrayList<>(seatRegions); // snapshot an toàn
+
                 yoloFuture = yoloExecutor.submit(() -> {
-                    List<YoloDetector.Detection> result = detector.detect(yoloBitmap);
-                    yoloBitmap.recycle(); // Giải phóng sau khi dùng xong
-                    return result;
+                    List<YoloDetector.Detection> allDetections = new ArrayList<>();
+                    if (!regions.isEmpty()) {
+                        // Detect từng vùng ghế → crop mang lại độ phân giải cao cho mỗi người
+                        for (RectF region : regions) {
+                            Bitmap crop = cropBitmapNormalized(yoloBitmap, region);
+                            List<YoloDetector.Detection> dets = detector.detect(crop);
+                            if (crop != yoloBitmap) crop.recycle();
+                            allDetections.addAll(mapDetections(dets, region));
+                        }
+                    } else {
+                        // Chưa calibrate (0 người) → fallback detect toàn ảnh
+                        allDetections = detector.detect(yoloBitmap);
+                    }
+                    yoloBitmap.recycle();
+                    return applyGlobalNMS(allDetections);
                 });
             }
 
             // ── DrowsinessDetector: chạy trên thread hiện tại (blocking OK) ─────
-            DrowsinessDetector.DrowsinessResult drowsinessResult =
-                    drowsinessDetector.detect(bitmap, timestampMs);
+            DrowsinessDetector.DrowsinessResult drowsinessResult = drowsinessDetector.detect(bitmap, timestampMs);
 
-            // ── Lấy kết quả YOLO (đợi Future nếu đã gửi) ────────────────────────
+            // ── Lấy kết quả YOLO (đợi Future nếu đã gửi) ────────────────────
             if (yoloFuture != null) {
                 try {
                     lastYoloDetections = new ArrayList<>(yoloFuture.get());
@@ -227,15 +288,17 @@ public class MainActivity extends AppCompatActivity {
                     Log.w(TAG, "YOLO inference error: " + e.getMessage());
                 }
             }
-            // Dùng kết quả YOLO mới nhất (kể cả frame bị skip)
             List<YoloDetector.Detection> seatbeltDetections = new ArrayList<>(lastYoloDetections);
 
-            // ── Thêm Bbox khuôn mặt vào danh sách hiển thị ──────────────────────
+            // ── Thêm Bbox khuôn mặt vào danh sách hiển thị ──────────────────
             if (drowsinessResult.faceDetected && drowsinessResult.faceBbox != null) {
                 String faceLabel = "Face";
-                if (drowsinessResult.isDrowsy) faceLabel = "Drowsy";
-                else if (drowsinessResult.isDistracted) faceLabel = "Distracted";
-                else if (drowsinessResult.isYawning) faceLabel = "Yawning";
+                if (drowsinessResult.isDrowsy)
+                    faceLabel = "Drowsy";
+                else if (drowsinessResult.isDistracted)
+                    faceLabel = "Distracted";
+                else if (drowsinessResult.isYawning)
+                    faceLabel = "Yawning";
 
                 seatbeltDetections.add(new YoloDetector.Detection(
                         drowsinessResult.faceBbox, -1, 1.0f, faceLabel));
@@ -255,10 +318,10 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-
     private Bitmap imageProxyToBitmap(@NonNull ImageProxy imageProxy) {
         Bitmap bitmap = imageProxy.toBitmap();
-        if (bitmap == null) return null;
+        if (bitmap == null)
+            return null;
 
         Matrix matrix = new Matrix();
         matrix.postRotate(imageProxy.getImageInfo().getRotationDegrees());
@@ -275,7 +338,8 @@ public class MainActivity extends AppCompatActivity {
         return Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true);
     }
 
-    private void updateUI(List<YoloDetector.Detection> detections, DrowsinessDetector.DrowsinessResult dResult, float fps) {
+    private void updateUI(List<YoloDetector.Detection> detections, DrowsinessDetector.DrowsinessResult dResult,
+            float fps) {
         fpsText.setText(String.format("%.1f FPS", fps));
         bboxOverlay.setDetections(detections);
 
@@ -283,9 +347,11 @@ public class MainActivity extends AppCompatActivity {
         YoloDetector.Detection bestNoBelt = null;
         for (YoloDetector.Detection d : detections) {
             if (d.label.equalsIgnoreCase("seatbelt") || d.label.equalsIgnoreCase("belt")) {
-                if (bestBelt == null || d.confidence > bestBelt.confidence) bestBelt = d;
+                if (bestBelt == null || d.confidence > bestBelt.confidence)
+                    bestBelt = d;
             } else if (d.label.equalsIgnoreCase("no-seatbelt") || d.label.equalsIgnoreCase("no_belt")) {
-                if (bestNoBelt == null || d.confidence > bestNoBelt.confidence) bestNoBelt = d;
+                if (bestNoBelt == null || d.confidence > bestNoBelt.confidence)
+                    bestNoBelt = d;
             }
         }
 
@@ -328,7 +394,8 @@ public class MainActivity extends AppCompatActivity {
                 confidenceText.setText(String.format("Độ tin cậy: %.1f%%", bestBelt.confidence * 100f));
             } else {
                 statusIcon.setText("🔍");
-                statusText.setText(dResult.faceDetected ? "Đã thấy mặt - Đang theo dõi..." : "Đang tìm kiếm khuôn mặt...");
+                statusText.setText(
+                        dResult.faceDetected ? "Đã thấy mặt - Đang theo dõi..." : "Đang tìm kiếm khuôn mặt...");
                 statusText.setTextColor(Color.WHITE);
 
                 if (dResult.faceDetected) {
@@ -342,6 +409,195 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    // =========================================================================
+    // Calibration helpers
+    // =========================================================================
+
+    /** Khởi động Calibration phase: reset trạng thái và hiển thị UI đếm ngược. */
+    private void startCalibration() {
+        isCalibrating       = true;
+        calibrationStartTime = System.currentTimeMillis();
+        accumulatedRegions.clear();
+        seatRegions.clear();
+        runOnUiThread(() -> {
+            statusIcon.setText("📷");
+            statusText.setText("Đang quét cabin... (5 giây)");
+            statusText.setTextColor(Color.WHITE);
+            confidenceText.setText("Vui lòng ngồi vào đúng vị trí ghế");
+        });
+    }
+
+    /**
+     * Xử lý mỗi frame trong Calibration phase:
+     *   - Cập nhật đếm ngược
+     *   - Chạy PoseDetector → lấy các vùng thân người
+     *   - Tích lũy vào accumulatedRegions (mỗi người = 1 slot)
+     *   - Khi hết thói gian: gọi finalizeCalibration()
+     */
+    private void processCalibrationFrame(Bitmap bitmap) {
+        long elapsed = System.currentTimeMillis() - calibrationStartTime;
+        long secsLeft = Math.max(0, (CALIBRATION_DURATION_MS - elapsed) / 1000 + 1);
+        runOnUiThread(() -> {
+            statusText.setText("Đang quét cabin... " + secsLeft + " giây");
+            fpsText.setText("CAL");
+        });
+
+        if (elapsed >= CALIBRATION_DURATION_MS) {
+            finalizeCalibration();
+            return;
+        }
+        if (drowsinessDetector == null) return;
+
+        try {
+            // Dùng TFLiteFaceDetector (face_detection.tflite) thay cho ML Kit
+            // → detect() trả về tất cả khuôn mặt trong khung hình
+            List<TFLiteFaceDetector.FaceBox> faces =
+                    drowsinessDetector.getTfliteDetector().detect(bitmap);
+
+            for (TFLiteFaceDetector.FaceBox faceBox : faces) {
+                RectF region = extractTorsoRegionFromFaceBox(faceBox.bbox, bitmap);
+                if (region != null) {
+                    // Khớp vào slot tồn tại theo IoU, nếu không mở slot mới
+                    boolean matched = false;
+                    for (List<RectF> slot : accumulatedRegions) {
+                        if (computeIoU(slot.get(slot.size() - 1), region) > 0.3f) {
+                            slot.add(region);
+                            matched = true;
+                            break;
+                        }
+                    }
+                    if (!matched) {
+                        List<RectF> newSlot = new ArrayList<>();
+                        newSlot.add(region);
+                        accumulatedRegions.add(newSlot);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Calibration TFLite face detection error: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Kết thúc Calibration: average bbox của mỗi slot → lưu vào seatRegions.
+     * Slot có ít hơn 3 quan sát bị loại (không ổn định).
+     */
+    private void finalizeCalibration() {
+        isCalibrating = false;
+        seatRegions.clear();
+        for (List<RectF> slot : accumulatedRegions) {
+            if (slot.size() < 3) continue;
+            float l = 0, t = 0, r = 0, b = 0;
+            for (RectF rect : slot) { l += rect.left; t += rect.top; r += rect.right; b += rect.bottom; }
+            int n = slot.size();
+            seatRegions.add(new RectF(l / n, t / n, r / n, b / n));
+        }
+        int count = seatRegions.size();
+        Log.i(TAG, "Calibration done: " + count + " seat(s) → " + seatRegions);
+        runOnUiThread(() -> {
+            statusIcon.setText(count > 0 ? "✅" : "⚠️");
+            statusText.setText(count > 0
+                    ? "Phát hiện " + count + " người — Bắt đầu theo dõi!"
+                    : "Không phát hiện ai — Dùng chế độ toàn ảnh");
+            statusText.setTextColor(count > 0 ? Color.GREEN : Color.YELLOW);
+            confidenceText.setText("");
+            fpsText.setText("0.0 FPS");
+        });
+    }
+
+    /**
+     * Tính vùng thân người từ bounding box khuôn mặt chuẩn hóa [0,1]
+     * (thay thế extractTorsoRegionFromFace dùng ML Kit).
+     *
+     * @param normalizedFaceBbox  RectF normalized [0,1] từ TFLiteFaceDetector.FaceBox.bbox
+     * @param bitmap              Frame gốc (chỉ cần kích thước)
+     * @return RectF vùng thân normalized [0,1], hoặc null nếu không hợp lệ
+     */
+    private RectF extractTorsoRegionFromFaceBox(RectF normalizedFaceBbox, Bitmap bitmap) {
+        float imgW = bitmap.getWidth();
+        float imgH = bitmap.getHeight();
+
+        // Chuyển bbox normalized → pixel để tính offset
+        float faceCenterX = normalizedFaceBbox.centerX() * imgW;
+        float faceTop     = normalizedFaceBbox.top    * imgH;
+        float faceBottom  = normalizedFaceBbox.bottom * imgH;
+        float faceW       = normalizedFaceBbox.width()  * imgW;
+        float faceH       = normalizedFaceBbox.height() * imgH;
+
+        // Mở rộng xuống phía dưới để lấy phần thân (rộng = 3x mặt, cao = 3.5x mặt)
+        float torsoWidth  = faceW * 3.0f;
+        float torsoHeight = faceH * 3.5f;
+
+        float minX = faceCenterX - torsoWidth / 2.0f;
+        float maxX = faceCenterX + torsoWidth / 2.0f;
+        float minY = faceTop - faceH * 0.5f; // Bao gồm cả phần đầu
+        float maxY = faceBottom + torsoHeight;
+
+        // Trả về normalized [0,1]
+        float left   = Math.max(0f, minX / imgW);
+        float top    = Math.max(0f, minY / imgH);
+        float right  = Math.min(1f, maxX / imgW);
+        float bottom = Math.min(1f, maxY / imgH);
+
+        if (right <= left || bottom <= top || (right - left) < 0.05f) return null;
+        return new RectF(left, top, right, bottom);
+    }
+
+    /** Crop bitmap theo RectF normalized [0,1]. Trả về bitmap gốc nếu crop không hợp lệ. */
+    private Bitmap cropBitmapNormalized(Bitmap bitmap, RectF r) {
+        int x = Math.max(0, (int)(r.left   * bitmap.getWidth()));
+        int y = Math.max(0, (int)(r.top    * bitmap.getHeight()));
+        int w = (int)(r.width()  * bitmap.getWidth());
+        int h = (int)(r.height() * bitmap.getHeight());
+        w = Math.min(w, bitmap.getWidth()  - x);
+        h = Math.min(h, bitmap.getHeight() - y);
+        if (w <= 0 || h <= 0) return bitmap;
+        return Bitmap.createBitmap(bitmap, x, y, w, h);
+    }
+
+    /** Map toạ độ detection từ không gian crop → không gian ảnh gốc. */
+    private List<YoloDetector.Detection> mapDetections(
+            List<YoloDetector.Detection> detections, RectF region) {
+        List<YoloDetector.Detection> mapped = new ArrayList<>();
+        float rW = region.width(), rH = region.height();
+        for (YoloDetector.Detection d : detections) {
+            float l = region.left + d.bbox.left   * rW;
+            float t = region.top  + d.bbox.top    * rH;
+            float r = region.left + d.bbox.right  * rW;
+            float b = region.top  + d.bbox.bottom * rH;
+            mapped.add(new YoloDetector.Detection(
+                    new RectF(Math.max(0f, Math.min(1f, l)), Math.max(0f, Math.min(1f, t)),
+                              Math.max(0f, Math.min(1f, r)), Math.max(0f, Math.min(1f, b))),
+                    d.classId, d.confidence, d.label));
+        }
+        return mapped;
+    }
+
+    /** Global NMS: loại bbox trùng từ nhiều crop, dùng IoU threshold giống YoloDetector. */
+    private List<YoloDetector.Detection> applyGlobalNMS(List<YoloDetector.Detection> detections) {
+        if (detections.isEmpty()) return detections;
+        detections.sort((a, b) -> Float.compare(b.confidence, a.confidence));
+        List<YoloDetector.Detection> result = new ArrayList<>();
+        boolean[] suppressed = new boolean[detections.size()];
+        for (int i = 0; i < detections.size(); i++) {
+            if (suppressed[i]) continue;
+            result.add(detections.get(i));
+            for (int j = i + 1; j < detections.size(); j++) {
+                if (!suppressed[j] && computeIoU(detections.get(i).bbox, detections.get(j).bbox) >= NMS_IOU_THRESHOLD)
+                    suppressed[j] = true;
+            }
+        }
+        return result;
+    }
+
+    private float computeIoU(RectF a, RectF b) {
+        float iL = Math.max(a.left, b.left), iT = Math.max(a.top, b.top);
+        float iR = Math.min(a.right, b.right), iB = Math.min(a.bottom, b.bottom);
+        if (iR <= iL || iB <= iT) return 0f;
+        float inter = (iR - iL) * (iB - iT);
+        return inter / (a.width() * a.height() + b.width() * b.height() - inter);
+    }
+
     private String[] loadLabels() {
         List<String> labelList = new ArrayList<>();
         try {
@@ -349,7 +605,8 @@ public class MainActivity extends AppCompatActivity {
             String line;
             while ((line = reader.readLine()) != null) {
                 line = line.trim();
-                if (!line.isEmpty()) labelList.add(line);
+                if (!line.isEmpty())
+                    labelList.add(line);
             }
             reader.close();
         } catch (IOException e) {
@@ -361,9 +618,14 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (cameraExecutor != null) cameraExecutor.shutdown();
-        if (yoloExecutor != null) yoloExecutor.shutdown();
-        if (detector != null) detector.close();
-        if (drowsinessDetector != null) drowsinessDetector.close();
+        if (cameraExecutor != null)
+            cameraExecutor.shutdown();
+        if (yoloExecutor != null)
+            yoloExecutor.shutdown();
+        if (detector != null)
+            detector.close();
+        if (drowsinessDetector != null)
+            drowsinessDetector.close();
+        // faceDetector (ML Kit) đã được loại bỏ — TFLiteFaceDetector được close trong drowsinessDetector.close()
     }
 }

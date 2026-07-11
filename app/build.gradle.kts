@@ -73,6 +73,7 @@ dependencies {
     // ML Kit Face Detection - thay thế MediaPipe
     // Dùng Google Play Services: không bundle .so vào APK → không bao giờ lỗi 16KB
     implementation(libs.mlkit.face.detection)
+    implementation(libs.mlkit.pose.detection)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.espresso.core)

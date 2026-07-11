@@ -313,6 +313,13 @@ public class DrowsinessDetector {
     }
 
     // -------------------------------------------------------------------------
+    // Getter — cho phép MainActivity tái sử dụng tfliteDetector trong Calibration
+    // -------------------------------------------------------------------------
+    public TFLiteFaceDetector getTfliteDetector() {
+        return tfliteDetector;
+    }
+
+    // -------------------------------------------------------------------------
     // Dọn dẹp tài nguyên
     // -------------------------------------------------------------------------
     public void close() {
