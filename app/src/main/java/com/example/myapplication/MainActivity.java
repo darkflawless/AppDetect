@@ -63,9 +63,11 @@ public class MainActivity extends AppCompatActivity {
     // Detector + Threading
     private YoloDetector detector;
     private DrowsinessDetector drowsinessDetector;
+    private PersonDetector personDetector;                   // detect toàn thân người
     private ExecutorService cameraExecutor;
-    private ExecutorService yoloExecutor; // Luồng riêng biệt cho YOLO inference
-    private ExecutorService drowsinessExecutor; // Luồng riêng biệt cho Drowsiness inference
+    private ExecutorService yoloExecutor;
+    private ExecutorService drowsinessExecutor;
+    private ExecutorService personExecutor;                  // luồng riêng cho person detect
 
     // Camera state
     private int lensFacing = CameraSelector.LENS_FACING_FRONT;
@@ -73,16 +75,17 @@ public class MainActivity extends AppCompatActivity {
 
     // FPS tracking
     private long lastFrameTime = 0L;
-    private boolean isProcessing = false; // Cờ chặn chồng chéo frame
+    private boolean isProcessing = false;
 
-    // Pending futures (fire-and-forget): submit rồi đi tiếp, lấy kết quả ở frame
-    // sau
+    // Pending futures
     private java.util.concurrent.Future<List<YoloDetector.Detection>> pendingYoloFuture = null;
     private java.util.concurrent.Future<DrowsinessDetector.DrowsinessResult> pendingDrowsinessFuture = null;
+    private java.util.concurrent.Future<List<android.graphics.RectF>> pendingPersonFuture = null;
 
-    // Kết quả mới nhất (dùng khi future chưa xong)
+    // Kết quả mới nhất
     private List<YoloDetector.Detection> lastYoloDetections = new ArrayList<>();
     private DrowsinessDetector.DrowsinessResult lastDrowsinessResult = null;
+    private List<android.graphics.RectF> lastPersonBboxes = new ArrayList<>();
 
     // Labels
     private String[] labels;
@@ -133,20 +136,21 @@ public class MainActivity extends AppCompatActivity {
 
         labels = loadLabels();
 
-        cameraExecutor = Executors.newSingleThreadExecutor();
-        yoloExecutor = Executors.newSingleThreadExecutor();
+        cameraExecutor    = Executors.newSingleThreadExecutor();
+        yoloExecutor      = Executors.newSingleThreadExecutor();
         drowsinessExecutor = Executors.newSingleThreadExecutor();
+        personExecutor    = Executors.newSingleThreadExecutor();
 
-        // Load model trước để sẵn sàng
+        // Load tất cả models trên background thread
         cameraExecutor.execute(() -> {
             try {
-                // Load cả 2 model trên background thread
                 drowsinessDetector = new DrowsinessDetector(this);
-                detector = new YoloDetector(this, labels);
+                detector           = new YoloDetector(this, labels);
+                personDetector     = new PersonDetector(this);
 
                 runOnUiThread(() -> {
                     btnStartTrip.setEnabled(true);
-                    Log.d(TAG, "Models loaded and ready");
+                    Log.d(TAG, "All models loaded and ready");
                 });
             } catch (Exception e) {
                 Log.e(TAG, "Failed to load models", e);
@@ -225,16 +229,17 @@ public class MainActivity extends AppCompatActivity {
             }
             lastTimestampMs = timestampMs;
 
-            // ── Thu thập kết quả nếu future đã xong (KHÔNG block) ───────────────
-            if (pendingYoloFuture != null && pendingYoloFuture.isDone()) {
+            // ── Thu kết quả person detection ─────────────────────────────────────
+            if (pendingPersonFuture != null && pendingPersonFuture.isDone()) {
                 try {
-                    lastYoloDetections = new ArrayList<>(pendingYoloFuture.get());
+                    lastPersonBboxes = new ArrayList<>(pendingPersonFuture.get());
                 } catch (Exception e) {
-                    Log.w(TAG, "YOLO result error: " + e.getMessage());
+                    Log.w(TAG, "Person result error: " + e.getMessage());
                 }
-                pendingYoloFuture = null;
+                pendingPersonFuture = null;
             }
 
+            // ── Thu kết quả drowsiness ────────────────────────────────────────────
             if (pendingDrowsinessFuture != null && pendingDrowsinessFuture.isDone()) {
                 try {
                     lastDrowsinessResult = pendingDrowsinessFuture.get();
@@ -244,9 +249,78 @@ public class MainActivity extends AppCompatActivity {
                 pendingDrowsinessFuture = null;
             }
 
-            // ── Submit job mới nếu executor đang rảnh (fire-and-forget) ───────────
-            // YOLO: chỉ submit khi future cũ đã hoàn thành (pendingYoloFuture == null)
-            if (detector != null && pendingYoloFuture == null) {
+            // ── Thu kết quả seatbelt ──────────────────────────────────────────────
+            if (pendingYoloFuture != null && pendingYoloFuture.isDone()) {
+                try {
+                    lastYoloDetections = new ArrayList<>(pendingYoloFuture.get());
+                } catch (Exception e) {
+                    Log.w(TAG, "YOLO result error: " + e.getMessage());
+                }
+                pendingYoloFuture = null;
+            }
+
+            // ── Submit Person Detection (step 1) ──────────────────────────────────
+            if (personDetector != null && pendingPersonFuture == null) {
+                final Bitmap personBitmap = bitmap.copy(bitmap.getConfig(), false);
+                pendingPersonFuture = personExecutor.submit(() -> {
+                    List<android.graphics.RectF> persons = personDetector.detectPersons(personBitmap);
+                    personBitmap.recycle();
+                    return persons;
+                });
+            }
+
+            // ── Submit Seatbelt Detection (step 2): crop từng người ───────────────
+            // Chạy khi: personFuture xong VÀ yoloFuture rảnh VÀ có ít nhất 1 người
+            if (detector != null && pendingYoloFuture == null && !lastPersonBboxes.isEmpty()) {
+                final Bitmap fullBitmap  = bitmap.copy(bitmap.getConfig(), false);
+                final int    bmpW        = fullBitmap.getWidth();
+                final int    bmpH        = fullBitmap.getHeight();
+                final List<android.graphics.RectF> persons = new ArrayList<>(lastPersonBboxes);
+
+                pendingYoloFuture = yoloExecutor.submit(() -> {
+                    List<YoloDetector.Detection> allSb = new ArrayList<>();
+
+                    for (android.graphics.RectF pBbox : persons) {
+                        // Tính tọa độ pixel của người trong ảnh gốc
+                        int px1 = Math.max(0, (int)(pBbox.left   * bmpW));
+                        int py1 = Math.max(0, (int)(pBbox.top    * bmpH));
+                        int px2 = Math.min(bmpW, (int)(pBbox.right  * bmpW));
+                        int py2 = Math.min(bmpH, (int)(pBbox.bottom * bmpH));
+                        int pw  = px2 - px1;
+                        int ph  = py2 - py1;
+
+                        if (pw < 10 || ph < 10) continue;
+
+                        // Crop ảnh người
+                        Bitmap personCrop = Bitmap.createBitmap(fullBitmap, px1, py1, pw, ph);
+
+                        // Detect seatbelt trên crop
+                        List<YoloDetector.Detection> sbOnCrop = detector.detect(personCrop);
+                        personCrop.recycle();
+
+                        // Map tọa độ bbox từ crop → full frame (normalized)
+                        float personW = pBbox.width();
+                        float personH = pBbox.height();
+                        for (YoloDetector.Detection d : sbOnCrop) {
+                            float gL = pBbox.left + d.bbox.left   * personW;
+                            float gT = pBbox.top  + d.bbox.top    * personH;
+                            float gR = pBbox.left + d.bbox.right  * personW;
+                            float gB = pBbox.top  + d.bbox.bottom * personH;
+                            allSb.add(new YoloDetector.Detection(
+                                    new android.graphics.RectF(gL, gT, gR, gB),
+                                    d.classId, d.confidence, d.label));
+                        }
+
+                        // Thêm bbox người vào overlay (label = "Person")
+                        allSb.add(new YoloDetector.Detection(
+                                new android.graphics.RectF(pBbox), -2, 1.0f, "Person"));
+                    }
+
+                    fullBitmap.recycle();
+                    return allSb;
+                });
+            } else if (detector != null && pendingYoloFuture == null && lastPersonBboxes.isEmpty()) {
+                // Không detect được người → fallback: chạy trên full frame như cũ
                 final Bitmap yoloBitmap = bitmap.copy(bitmap.getConfig(), false);
                 pendingYoloFuture = yoloExecutor.submit(() -> {
                     List<YoloDetector.Detection> result = detector.detect(yoloBitmap);
@@ -255,7 +329,7 @@ public class MainActivity extends AppCompatActivity {
                 });
             }
 
-            // Drowsiness: chỉ submit khi future cũ đã hoàn thành
+            // ── Submit Drowsiness ─────────────────────────────────────────────────
             if (pendingDrowsinessFuture == null) {
                 final Bitmap drowsinessBitmap = bitmap.copy(bitmap.getConfig(), false);
                 final long ts = timestampMs;
@@ -266,22 +340,19 @@ public class MainActivity extends AppCompatActivity {
                 });
             }
 
-            // ── Dùng kết quả cũ nhất để vẽ UI (camera thread không bị block) ──────
+            // ── Dùng kết quả mới nhất để vẽ UI ───────────────────────────────────
             DrowsinessDetector.DrowsinessResult drowsinessResult = (lastDrowsinessResult != null)
                     ? lastDrowsinessResult
                     : new DrowsinessDetector.DrowsinessResult();
 
             List<YoloDetector.Detection> seatbeltDetections = new ArrayList<>(lastYoloDetections);
 
-            // ── Thêm Bbox khuôn mặt vào danh sách hiển thị ──────────────────────
+            // ── Thêm bbox khuôn mặt vào overlay ──────────────────────────────────
             if (drowsinessResult.faceDetected && drowsinessResult.faceBbox != null) {
                 String faceLabel = "Face";
-                if (drowsinessResult.isDrowsy)
-                    faceLabel = "Drowsy";
-                else if (drowsinessResult.isDistracted)
-                    faceLabel = "Distracted";
-                else if (drowsinessResult.isYawning)
-                    faceLabel = "Yawning";
+                if (drowsinessResult.isDrowsy)       faceLabel = "Drowsy";
+                else if (drowsinessResult.isDistracted) faceLabel = "Distracted";
+                else if (drowsinessResult.isYawning)    faceLabel = "Yawning";
 
                 seatbeltDetections.add(new YoloDetector.Detection(
                         drowsinessResult.faceBbox, -1, 1.0f, faceLabel));
@@ -412,15 +483,12 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (cameraExecutor != null)
-            cameraExecutor.shutdown();
-        if (yoloExecutor != null)
-            yoloExecutor.shutdown();
-        if (drowsinessExecutor != null)
-            drowsinessExecutor.shutdown();
-        if (detector != null)
-            detector.close();
-        if (drowsinessDetector != null)
-            drowsinessDetector.close();
+        if (cameraExecutor    != null) cameraExecutor.shutdown();
+        if (yoloExecutor      != null) yoloExecutor.shutdown();
+        if (drowsinessExecutor != null) drowsinessExecutor.shutdown();
+        if (personExecutor    != null) personExecutor.shutdown();
+        if (detector          != null) detector.close();
+        if (drowsinessDetector != null) drowsinessDetector.close();
+        if (personDetector    != null) personDetector.close();
     }
 }
