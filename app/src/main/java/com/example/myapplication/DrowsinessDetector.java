@@ -46,6 +46,9 @@ public class DrowsinessDetector {
     // Chiều ngang mở rộng 50% (để lấy hết 2 bên má/tai)
     private static final float FACE_CROP_PADDING_X = 0.25f;
 
+    // Tỷ lệ vùng tài xế: crop 1/2 bên trái của frame (ghế lái thường nằm bên trái)
+    private static final float DRIVER_REGION_FRACTION = 1f / 2f;
+
     // Bước 1: TFLite YOLO face detector (model tự train)
     private final TFLiteFaceDetector tfliteDetector;
 
@@ -55,10 +58,10 @@ public class DrowsinessDetector {
 
     private long firstClosedEyeTime = 0;
     private long lastDrowsyTime = 0;
-    
+
     private long firstDistractedTime = 0;
     private long lastDistractedTime = 0;
-    
+
     private long firstFaceMissingTime = 0;
 
     // -------------------------------------------------------------------------
@@ -102,23 +105,28 @@ public class DrowsinessDetector {
         DrowsinessResult result = new DrowsinessResult();
 
         try {
-            // ── Bước 1: TFLite detect khuôn mặt ──────────────────────────────
-            RectF faceBbox = tfliteDetector.detectBestFace(bitmap);
+            // ── Bước 1: Crop vùng tài xế (1/3 bên trái frame) ───────────────
+            // Tài xế luôn ngồi bên trái (từ góc nhìn camera hướng vào cabin)
+            Bitmap driverRegion = cropDriverRegion(bitmap);
 
-            if (faceBbox == null) {
+            // ── Bước 2: TFLite detect khuôn mặt trong vùng tài xế ───────────
+            RectF faceBboxInCrop = tfliteDetector.detectBestFace(driverRegion);
+
+            if (faceBboxInCrop == null) {
                 // Không tìm thấy mặt ở vị trí ghế lái -> Tăng bộ đếm Face Missing
                 if (firstFaceMissingTime == 0) {
                     firstFaceMissingTime = System.currentTimeMillis();
                 }
                 long missingDuration = System.currentTimeMillis() - firstFaceMissingTime;
-                
+
                 if (missingDuration >= FACE_MISSING_TIME_THRESHOLD_MS) {
                     result.isFaceMissing = true;
-                    // Báo động xong thì reset tracker để frame sau nó tự quét tìm mặt to nhất lại từ đầu
-                    tfliteDetector.resetTracker(); 
+                    // Báo động xong thì reset tracker để frame sau tự quét lại từ đầu
+                    tfliteDetector.resetTracker();
                 }
 
-                // Không tìm thấy mặt → reset timer buồn ngủ/mất tập trung, giữ cảnh báo persistence nếu còn hiệu lực
+                // Không tìm thấy mặt → reset timer buồn ngủ/mất tập trung, giữ cảnh báo
+                // persistence nếu còn hiệu lực
                 firstClosedEyeTime = 0;
                 firstDistractedTime = 0;
                 result.isDrowsy = (System.currentTimeMillis() - lastDrowsyTime < ALERT_PERSISTENCE_MS);
@@ -129,21 +137,25 @@ public class DrowsinessDetector {
                 firstFaceMissingTime = 0;
             }
 
-            // Tính box đã thêm padding để hiển thị lên màn hình cho bạn dễ hình dung
-            float padX = (faceBbox.right - faceBbox.left) * FACE_CROP_PADDING_X;
+            // Map bbox từ tọa độ vùng crop (1/3 trái) → tọa độ full frame để vẽ UI đúng
+            RectF faceBboxFull = mapBboxToFullFrame(faceBboxInCrop);
+
+            // Tính box đã thêm padding để hiển thị lên màn hình
+            float padX = (faceBboxFull.right - faceBboxFull.left) * FACE_CROP_PADDING_X;
             RectF paddedBbox = new RectF(
-                    Math.max(0f, faceBbox.left - padX),
-                    faceBbox.top,
-                    Math.min(1f, faceBbox.right + padX),
-                    faceBbox.bottom);
+                    Math.max(0f, faceBboxFull.left - padX),
+                    faceBboxFull.top,
+                    Math.min(1f, faceBboxFull.right + padX),
+                    faceBboxFull.bottom);
 
             result.faceDetected = true;
             result.faceBbox = paddedBbox; // Gửi box đã padding ra UI để vẽ khung
 
-            // ── Bước 2: Crop khuôn mặt (có padding) để đưa vào ML Kit ────────
-            Bitmap faceCrop = cropFace(bitmap, faceBbox);
+            // ── Bước 3: Crop khuôn mặt (có padding) từ driverRegion để đưa vào ML Kit
+            // Dùng faceBboxInCrop (tọa độ trong vùng crop) để cắt chính xác
+            Bitmap faceCrop = cropFace(driverRegion, faceBboxInCrop);
 
-            // ── Bước 3: ML Kit lấy contour landmark trên ảnh crop ────────────
+            // ── Bước 4: ML Kit lấy contour landmark trên ảnh crop ────────────
             InputImage inputImage = InputImage.fromBitmap(faceCrop, 0);
             List<Face> faces = Tasks.await(mlkitDetector.process(inputImage));
 
@@ -167,7 +179,7 @@ public class DrowsinessDetector {
                 }
                 // --- Lấy góc quay của đầu (Yaw) ---
                 result.headEulerY = face.getHeadEulerAngleY();
-                
+
             } else {
                 // ML Kit không thấy contour trong crop → dùng EAR mặc định (mắt mở)
                 Log.d(TAG, "ML Kit: không tìm thấy contour trong crop");
@@ -227,8 +239,31 @@ public class DrowsinessDetector {
     }
 
     // -------------------------------------------------------------------------
-    // Crop khuôn mặt từ bitmap gốc + padding để ML Kit không bị cắt viền
-    // faceBbox: normalized [0,1] từ TFLite
+    // cropDriverRegion: Crop 1/3 bên trái của frame để lấy vùng ghế lái
+    // -------------------------------------------------------------------------
+    private Bitmap cropDriverRegion(Bitmap bitmap) {
+        int cropW = (int) (bitmap.getWidth() * DRIVER_REGION_FRACTION);
+        cropW = Math.max(1, cropW); // tránh cropW = 0
+        return Bitmap.createBitmap(bitmap, 0, 0, cropW, bitmap.getHeight());
+    }
+
+    // -------------------------------------------------------------------------
+    // mapBboxToFullFrame: Map bbox từ tọa độ vùng crop (1/3 trái) → full frame
+    // Trục X được scale theo DRIVER_REGION_FRACTION, trục Y giữ nguyên
+    // -------------------------------------------------------------------------
+    private RectF mapBboxToFullFrame(RectF bboxInCrop) {
+        if (bboxInCrop == null)
+            return null;
+        return new RectF(
+                bboxInCrop.left * DRIVER_REGION_FRACTION,
+                bboxInCrop.top,
+                bboxInCrop.right * DRIVER_REGION_FRACTION,
+                bboxInCrop.bottom);
+    }
+
+    // -------------------------------------------------------------------------
+    // Crop khuôn mặt từ bitmap + padding để ML Kit không bị cắt viền
+    // faceBbox: normalized [0,1] trong không gian của bitmap được truyền vào
     // -------------------------------------------------------------------------
     private Bitmap cropFace(Bitmap bitmap, RectF bbox) {
         int imgW = bitmap.getWidth();

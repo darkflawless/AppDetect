@@ -66,8 +66,11 @@ public class MainActivity extends AppCompatActivity {
     // Detector + Threading
     private YoloDetector detector;
     private DrowsinessDetector drowsinessDetector;
+    private PersonDetector personDetector;                   // detect toàn thân người
     private ExecutorService cameraExecutor;
-    private ExecutorService yoloExecutor; // Luồng riêng biệt cho YOLO inference
+    private ExecutorService yoloExecutor;
+    private ExecutorService drowsinessExecutor;
+    private ExecutorService personExecutor;                  // luồng riêng cho person detect
 
     // Camera state
     private int lensFacing = CameraSelector.LENS_FACING_FRONT;
@@ -75,23 +78,17 @@ public class MainActivity extends AppCompatActivity {
 
     // FPS tracking
     private long lastFrameTime = 0L;
-    private boolean isProcessing = false; // Cờ chặn chồng chéo frame
+    private boolean isProcessing = false;
 
-    // Frame skip: YOLO chạy mỗi YOLO_SKIP_FRAMES frame (tiết kiệm tài nguyên)
-    private static final int YOLO_SKIP_FRAMES = 2;
-    private int frameCounter = 0;
+    // Pending futures
+    private java.util.concurrent.Future<List<YoloDetector.Detection>> pendingYoloFuture = null;
+    private java.util.concurrent.Future<DrowsinessDetector.DrowsinessResult> pendingDrowsinessFuture = null;
+    private java.util.concurrent.Future<List<android.graphics.RectF>> pendingPersonFuture = null;
+
+    // Kết quả mới nhất
     private List<YoloDetector.Detection> lastYoloDetections = new ArrayList<>();
-
-    // ── Calibration: quét cabin 5 giây đầu để xác định vị trí từng người ──────────
-    private static final long  CALIBRATION_DURATION_MS   = 5000L;  // 5 giây
-    private static final float POSE_CONFIDENCE_THRESHOLD = 0.5f;
-    private static final float NMS_IOU_THRESHOLD         = 0.45f;
-
-    private boolean isCalibrating      = false;
-    private long    calibrationStartTime = 0L;
-    private final List<List<RectF>> accumulatedRegions = new ArrayList<>(); // tích lũy trong 5s
-    private final List<RectF>       seatRegions        = new ArrayList<>(); // vùng ghế cuối cùng
-    // faceDetector đã bị loại bỏ — Calibration dùng TFLiteFaceDetector từ drowsinessDetector
+    private DrowsinessDetector.DrowsinessResult lastDrowsinessResult = null;
+    private List<android.graphics.RectF> lastPersonBboxes = new ArrayList<>();
 
     // Labels
     private String[] labels;
@@ -137,27 +134,26 @@ public class MainActivity extends AppCompatActivity {
         btnStartTrip.setOnClickListener(v -> {
             isTripStarted = true;
             startOverlay.setVisibility(android.view.View.GONE);
-            startCalibration();      // Bắt đầu quét cabin 5 giây
             checkAndStartCamera();
         });
 
         labels = loadLabels();
 
-        cameraExecutor = Executors.newSingleThreadExecutor();
-        yoloExecutor = Executors.newSingleThreadExecutor();
+        cameraExecutor    = Executors.newSingleThreadExecutor();
+        yoloExecutor      = Executors.newSingleThreadExecutor();
+        drowsinessExecutor = Executors.newSingleThreadExecutor();
+        personExecutor    = Executors.newSingleThreadExecutor();
 
-        // Load model trước để sẵn sàng
+        // Load tất cả models trên background thread
         cameraExecutor.execute(() -> {
             try {
-                // Load cả 2 model trên background thread
                 drowsinessDetector = new DrowsinessDetector(this);
-                detector = new YoloDetector(this, labels);
-                // Calibration phase tái sử dụng TFLiteFaceDetector bên trong drowsinessDetector
-                // → không cần khởi tạo thêm ML Kit FaceDetector nữa
+                detector           = new YoloDetector(this, labels);
+                personDetector     = new PersonDetector(this);
 
                 runOnUiThread(() -> {
                     btnStartTrip.setEnabled(true);
-                    Log.d(TAG, "Models loaded and ready");
+                    Log.d(TAG, "All models loaded and ready");
                 });
             } catch (Exception e) {
                 Log.e(TAG, "Failed to load models", e);
@@ -235,70 +231,131 @@ public class MainActivity extends AppCompatActivity {
                 timestampMs = lastTimestampMs + 1;
             }
             lastTimestampMs = timestampMs;
-            frameCounter++;
 
-            // ── CALIBRATION PHASE ─────────────────────────────────────────────
-            // 5 giây đầu: dùng PoseDetector tìm tất cả người, tích lũy vùng ghế
-            if (isCalibrating) {
-                processCalibrationFrame(bitmap);
-                DrowsinessDetector.DrowsinessResult dCal = drowsinessDetector.detect(bitmap, timestampMs);
-                long nowCal = System.currentTimeMillis();
-                float fpsCal = (lastFrameTime > 0) ? 1000f / (nowCal - lastFrameTime) : 0f;
-                lastFrameTime = nowCal;
-                List<YoloDetector.Detection> faceOnly = new ArrayList<>();
-                if (dCal.faceDetected && dCal.faceBbox != null)
-                    faceOnly.add(new YoloDetector.Detection(dCal.faceBbox, -1, 1.0f, "Face"));
-                runOnUiThread(() -> updateUI(faceOnly, dCal, fpsCal));
-                return; // finally vẫn chạy: imageProxy.close() + isProcessing = false
+            // ── Thu kết quả person detection ─────────────────────────────────────
+            if (pendingPersonFuture != null && pendingPersonFuture.isDone()) {
+                try {
+                    lastPersonBboxes = new ArrayList<>(pendingPersonFuture.get());
+                } catch (Exception e) {
+                    Log.w(TAG, "Person result error: " + e.getMessage());
+                }
+                pendingPersonFuture = null;
             }
 
-            // ── MONITORING PHASE: YOLO detect trên vùng ghế đã calibrate ──────────
-            java.util.concurrent.Future<List<YoloDetector.Detection>> yoloFuture = null;
-            if (detector != null && frameCounter % YOLO_SKIP_FRAMES == 0) {
-                final Bitmap yoloBitmap = bitmap.copy(bitmap.getConfig(), false);
-                final List<RectF> regions = new ArrayList<>(seatRegions); // snapshot an toàn
+            // ── Thu kết quả drowsiness ────────────────────────────────────────────
+            if (pendingDrowsinessFuture != null && pendingDrowsinessFuture.isDone()) {
+                try {
+                    lastDrowsinessResult = pendingDrowsinessFuture.get();
+                } catch (Exception e) {
+                    Log.w(TAG, "Drowsiness result error: " + e.getMessage());
+                }
+                pendingDrowsinessFuture = null;
+            }
 
-                yoloFuture = yoloExecutor.submit(() -> {
-                    List<YoloDetector.Detection> allDetections = new ArrayList<>();
-                    if (!regions.isEmpty()) {
-                        // Detect từng vùng ghế → crop mang lại độ phân giải cao cho mỗi người
-                        for (RectF region : regions) {
-                            Bitmap crop = cropBitmapNormalized(yoloBitmap, region);
-                            List<YoloDetector.Detection> dets = detector.detect(crop);
-                            if (crop != yoloBitmap) crop.recycle();
-                            allDetections.addAll(mapDetections(dets, region));
-                        }
-                    } else {
-                        // Chưa calibrate (0 người) → fallback detect toàn ảnh
-                        allDetections = detector.detect(yoloBitmap);
-                    }
-                    yoloBitmap.recycle();
-                    return applyGlobalNMS(allDetections);
+            // ── Thu kết quả seatbelt ──────────────────────────────────────────────
+            if (pendingYoloFuture != null && pendingYoloFuture.isDone()) {
+                try {
+                    lastYoloDetections = new ArrayList<>(pendingYoloFuture.get());
+                } catch (Exception e) {
+                    Log.w(TAG, "YOLO result error: " + e.getMessage());
+                }
+                pendingYoloFuture = null;
+            }
+
+            // ── Submit Person Detection (step 1) ──────────────────────────────────
+            if (personDetector != null && pendingPersonFuture == null) {
+                final Bitmap personBitmap = bitmap.copy(bitmap.getConfig(), false);
+                pendingPersonFuture = personExecutor.submit(() -> {
+                    List<android.graphics.RectF> persons = personDetector.detectPersons(personBitmap);
+                    personBitmap.recycle();
+                    return persons;
                 });
             }
 
-            // ── DrowsinessDetector: chạy trên thread hiện tại (blocking OK) ─────
-            DrowsinessDetector.DrowsinessResult drowsinessResult = drowsinessDetector.detect(bitmap, timestampMs);
+            // ── Submit Seatbelt Detection (step 2): crop từng người ───────────────
+            // Chạy khi: personFuture xong VÀ yoloFuture rảnh VÀ có ít nhất 1 người
+            if (detector != null && pendingYoloFuture == null && !lastPersonBboxes.isEmpty()) {
+                final Bitmap fullBitmap  = bitmap.copy(bitmap.getConfig(), false);
+                final int    bmpW        = fullBitmap.getWidth();
+                final int    bmpH        = fullBitmap.getHeight();
+                final List<android.graphics.RectF> persons = new ArrayList<>(lastPersonBboxes);
 
-            // ── Lấy kết quả YOLO (đợi Future nếu đã gửi) ────────────────────
-            if (yoloFuture != null) {
-                try {
-                    lastYoloDetections = new ArrayList<>(yoloFuture.get());
-                } catch (Exception e) {
-                    Log.w(TAG, "YOLO inference error: " + e.getMessage());
-                }
+                pendingYoloFuture = yoloExecutor.submit(() -> {
+                    List<YoloDetector.Detection> allSb = new ArrayList<>();
+
+                    for (android.graphics.RectF pBbox : persons) {
+                        // Tính tọa độ pixel của người trong ảnh gốc
+                        int px1 = Math.max(0, (int)(pBbox.left   * bmpW));
+                        int py1 = Math.max(0, (int)(pBbox.top    * bmpH));
+                        int px2 = Math.min(bmpW, (int)(pBbox.right  * bmpW));
+                        int py2 = Math.min(bmpH, (int)(pBbox.bottom * bmpH));
+                        int pw  = px2 - px1;
+                        int ph  = py2 - py1;
+
+                        if (pw < 10 || ph < 10) continue;
+
+                        // Crop ảnh người
+                        Bitmap personCrop = Bitmap.createBitmap(fullBitmap, px1, py1, pw, ph);
+
+                        // Detect seatbelt trên crop
+                        List<YoloDetector.Detection> sbOnCrop = detector.detect(personCrop);
+                        personCrop.recycle();
+
+                        // Map tọa độ bbox từ crop → full frame (normalized)
+                        float personW = pBbox.width();
+                        float personH = pBbox.height();
+                        for (YoloDetector.Detection d : sbOnCrop) {
+                            float gL = pBbox.left + d.bbox.left   * personW;
+                            float gT = pBbox.top  + d.bbox.top    * personH;
+                            float gR = pBbox.left + d.bbox.right  * personW;
+                            float gB = pBbox.top  + d.bbox.bottom * personH;
+                            allSb.add(new YoloDetector.Detection(
+                                    new android.graphics.RectF(gL, gT, gR, gB),
+                                    d.classId, d.confidence, d.label));
+                        }
+
+                        // Thêm bbox người vào overlay (label = "Person")
+                        allSb.add(new YoloDetector.Detection(
+                                new android.graphics.RectF(pBbox), -2, 1.0f, "Person"));
+                    }
+
+                    fullBitmap.recycle();
+                    return allSb;
+                });
+            } else if (detector != null && pendingYoloFuture == null && lastPersonBboxes.isEmpty()) {
+                // Không detect được người → fallback: chạy trên full frame như cũ
+                final Bitmap yoloBitmap = bitmap.copy(bitmap.getConfig(), false);
+                pendingYoloFuture = yoloExecutor.submit(() -> {
+                    List<YoloDetector.Detection> result = detector.detect(yoloBitmap);
+                    yoloBitmap.recycle();
+                    return result;
+                });
             }
+
+            // ── Submit Drowsiness ─────────────────────────────────────────────────
+            if (pendingDrowsinessFuture == null) {
+                final Bitmap drowsinessBitmap = bitmap.copy(bitmap.getConfig(), false);
+                final long ts = timestampMs;
+                pendingDrowsinessFuture = drowsinessExecutor.submit(() -> {
+                    DrowsinessDetector.DrowsinessResult r = drowsinessDetector.detect(drowsinessBitmap, ts);
+                    drowsinessBitmap.recycle();
+                    return r;
+                });
+            }
+
+            // ── Dùng kết quả mới nhất để vẽ UI ───────────────────────────────────
+            DrowsinessDetector.DrowsinessResult drowsinessResult = (lastDrowsinessResult != null)
+                    ? lastDrowsinessResult
+                    : new DrowsinessDetector.DrowsinessResult();
+
             List<YoloDetector.Detection> seatbeltDetections = new ArrayList<>(lastYoloDetections);
 
-            // ── Thêm Bbox khuôn mặt vào danh sách hiển thị ──────────────────
+            // ── Thêm bbox khuôn mặt vào overlay ──────────────────────────────────
             if (drowsinessResult.faceDetected && drowsinessResult.faceBbox != null) {
                 String faceLabel = "Face";
-                if (drowsinessResult.isDrowsy)
-                    faceLabel = "Drowsy";
-                else if (drowsinessResult.isDistracted)
-                    faceLabel = "Distracted";
-                else if (drowsinessResult.isYawning)
-                    faceLabel = "Yawning";
+                if (drowsinessResult.isDrowsy)       faceLabel = "Drowsy";
+                else if (drowsinessResult.isDistracted) faceLabel = "Distracted";
+                else if (drowsinessResult.isYawning)    faceLabel = "Yawning";
 
                 seatbeltDetections.add(new YoloDetector.Detection(
                         drowsinessResult.faceBbox, -1, 1.0f, faceLabel));
@@ -618,14 +675,12 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (cameraExecutor != null)
-            cameraExecutor.shutdown();
-        if (yoloExecutor != null)
-            yoloExecutor.shutdown();
-        if (detector != null)
-            detector.close();
-        if (drowsinessDetector != null)
-            drowsinessDetector.close();
-        // faceDetector (ML Kit) đã được loại bỏ — TFLiteFaceDetector được close trong drowsinessDetector.close()
+        if (cameraExecutor    != null) cameraExecutor.shutdown();
+        if (yoloExecutor      != null) yoloExecutor.shutdown();
+        if (drowsinessExecutor != null) drowsinessExecutor.shutdown();
+        if (personExecutor    != null) personExecutor.shutdown();
+        if (detector          != null) detector.close();
+        if (drowsinessDetector != null) drowsinessDetector.close();
+        if (personDetector    != null) personDetector.close();
     }
 }

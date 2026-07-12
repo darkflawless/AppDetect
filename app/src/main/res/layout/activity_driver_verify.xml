@@ -1,4 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    res/layout/activity_driver_verify.xml
+
+    Layout màn hình xác thực tài xế:
+    - PreviewView: hiển thị camera realtime
+    - TextView: trạng thái / kết quả verify
+    - Button: bắt đầu / dừng xác thực
+-->
 <androidx.constraintlayout.widget.ConstraintLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
