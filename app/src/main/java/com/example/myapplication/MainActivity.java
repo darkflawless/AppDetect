@@ -93,6 +93,14 @@ public class MainActivity extends AppCompatActivity {
     // Labels
     private String[] labels;
 
+    // Calibration state
+    private boolean isCalibrating = false;
+    private long calibrationStartTime = 0;
+    private static final long CALIBRATION_DURATION_MS = 5000;
+    private final List<List<RectF>> accumulatedRegions = new ArrayList<>();
+    private final List<RectF> seatRegions = new ArrayList<>();
+    private static final float NMS_IOU_THRESHOLD = 0.5f;
+
     private final ActivityResultLauncher<String> cameraPermissionLauncher = registerForActivityResult(
             new ActivityResultContracts.RequestPermission(), granted -> {
                 if (granted) {
@@ -135,6 +143,7 @@ public class MainActivity extends AppCompatActivity {
             isTripStarted = true;
             startOverlay.setVisibility(android.view.View.GONE);
             checkAndStartCamera();
+            startCalibration();
         });
 
         labels = loadLabels();
@@ -222,6 +231,13 @@ public class MainActivity extends AppCompatActivity {
         try {
             Bitmap bitmap = imageProxyToBitmap(imageProxy);
             if (bitmap == null) {
+                isProcessing = false;
+                return;
+            }
+
+            if (isCalibrating) {
+                processCalibrationFrame(bitmap);
+                imageProxy.close();
                 isProcessing = false;
                 return;
             }
