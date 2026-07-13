@@ -93,13 +93,7 @@ public class MainActivity extends AppCompatActivity {
     // Labels
     private String[] labels;
 
-    // Calibration state
-    private boolean isCalibrating = false;
-    private long calibrationStartTime = 0;
-    private static final long CALIBRATION_DURATION_MS = 5000;
-    private final List<List<RectF>> accumulatedRegions = new ArrayList<>();
-    private final List<RectF> seatRegions = new ArrayList<>();
-    private static final float NMS_IOU_THRESHOLD = 0.5f;
+
 
     private final ActivityResultLauncher<String> cameraPermissionLauncher = registerForActivityResult(
             new ActivityResultContracts.RequestPermission(), granted -> {
@@ -143,7 +137,6 @@ public class MainActivity extends AppCompatActivity {
             isTripStarted = true;
             startOverlay.setVisibility(android.view.View.GONE);
             checkAndStartCamera();
-            startCalibration();
         });
 
         labels = loadLabels();
@@ -235,12 +228,7 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            if (isCalibrating) {
-                processCalibrationFrame(bitmap);
-                imageProxy.close();
-                isProcessing = false;
-                return;
-            }
+
 
             long timestampMs = imageProxy.getImageInfo().getTimestamp() / 1000000;
             if (timestampMs <= lastTimestampMs) {
@@ -482,194 +470,21 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // =========================================================================
-    // Calibration helpers
-    // =========================================================================
 
-    /** Khởi động Calibration phase: reset trạng thái và hiển thị UI đếm ngược. */
-    private void startCalibration() {
-        isCalibrating       = true;
-        calibrationStartTime = System.currentTimeMillis();
-        accumulatedRegions.clear();
-        seatRegions.clear();
-        runOnUiThread(() -> {
-            statusIcon.setText("📷");
-            statusText.setText("Đang quét cabin... (5 giây)");
-            statusText.setTextColor(Color.WHITE);
-            confidenceText.setText("Vui lòng ngồi vào đúng vị trí ghế");
-        });
-    }
 
-    /**
-     * Xử lý mỗi frame trong Calibration phase:
-     *   - Cập nhật đếm ngược
-     *   - Chạy PoseDetector → lấy các vùng thân người
-     *   - Tích lũy vào accumulatedRegions (mỗi người = 1 slot)
-     *   - Khi hết thói gian: gọi finalizeCalibration()
-     */
-    private void processCalibrationFrame(Bitmap bitmap) {
-        long elapsed = System.currentTimeMillis() - calibrationStartTime;
-        long secsLeft = Math.max(0, (CALIBRATION_DURATION_MS - elapsed) / 1000 + 1);
-        runOnUiThread(() -> {
-            statusText.setText("Đang quét cabin... " + secsLeft + " giây");
-            fpsText.setText("CAL");
-        });
 
-        if (elapsed >= CALIBRATION_DURATION_MS) {
-            finalizeCalibration();
-            return;
-        }
-        if (drowsinessDetector == null) return;
 
-        try {
-            // Dùng TFLiteFaceDetector (face_detection.tflite) thay cho ML Kit
-            // → detect() trả về tất cả khuôn mặt trong khung hình
-            List<TFLiteFaceDetector.FaceBox> faces =
-                    drowsinessDetector.getTfliteDetector().detect(bitmap);
 
-            for (TFLiteFaceDetector.FaceBox faceBox : faces) {
-                RectF region = extractTorsoRegionFromFaceBox(faceBox.bbox, bitmap);
-                if (region != null) {
-                    // Khớp vào slot tồn tại theo IoU, nếu không mở slot mới
-                    boolean matched = false;
-                    for (List<RectF> slot : accumulatedRegions) {
-                        if (computeIoU(slot.get(slot.size() - 1), region) > 0.3f) {
-                            slot.add(region);
-                            matched = true;
-                            break;
-                        }
-                    }
-                    if (!matched) {
-                        List<RectF> newSlot = new ArrayList<>();
-                        newSlot.add(region);
-                        accumulatedRegions.add(newSlot);
-                    }
-                }
-            }
-        } catch (Exception e) {
-            Log.w(TAG, "Calibration TFLite face detection error: " + e.getMessage());
-        }
-    }
 
-    /**
-     * Kết thúc Calibration: average bbox của mỗi slot → lưu vào seatRegions.
-     * Slot có ít hơn 3 quan sát bị loại (không ổn định).
-     */
-    private void finalizeCalibration() {
-        isCalibrating = false;
-        seatRegions.clear();
-        for (List<RectF> slot : accumulatedRegions) {
-            if (slot.size() < 3) continue;
-            float l = 0, t = 0, r = 0, b = 0;
-            for (RectF rect : slot) { l += rect.left; t += rect.top; r += rect.right; b += rect.bottom; }
-            int n = slot.size();
-            seatRegions.add(new RectF(l / n, t / n, r / n, b / n));
-        }
-        int count = seatRegions.size();
-        Log.i(TAG, "Calibration done: " + count + " seat(s) → " + seatRegions);
-        runOnUiThread(() -> {
-            statusIcon.setText(count > 0 ? "✅" : "⚠️");
-            statusText.setText(count > 0
-                    ? "Phát hiện " + count + " người — Bắt đầu theo dõi!"
-                    : "Không phát hiện ai — Dùng chế độ toàn ảnh");
-            statusText.setTextColor(count > 0 ? Color.GREEN : Color.YELLOW);
-            confidenceText.setText("");
-            fpsText.setText("0.0 FPS");
-        });
-    }
 
-    /**
-     * Tính vùng thân người từ bounding box khuôn mặt chuẩn hóa [0,1]
-     * (thay thế extractTorsoRegionFromFace dùng ML Kit).
-     *
-     * @param normalizedFaceBbox  RectF normalized [0,1] từ TFLiteFaceDetector.FaceBox.bbox
-     * @param bitmap              Frame gốc (chỉ cần kích thước)
-     * @return RectF vùng thân normalized [0,1], hoặc null nếu không hợp lệ
-     */
-    private RectF extractTorsoRegionFromFaceBox(RectF normalizedFaceBbox, Bitmap bitmap) {
-        float imgW = bitmap.getWidth();
-        float imgH = bitmap.getHeight();
 
-        // Chuyển bbox normalized → pixel để tính offset
-        float faceCenterX = normalizedFaceBbox.centerX() * imgW;
-        float faceTop     = normalizedFaceBbox.top    * imgH;
-        float faceBottom  = normalizedFaceBbox.bottom * imgH;
-        float faceW       = normalizedFaceBbox.width()  * imgW;
-        float faceH       = normalizedFaceBbox.height() * imgH;
 
-        // Mở rộng xuống phía dưới để lấy phần thân (rộng = 3x mặt, cao = 3.5x mặt)
-        float torsoWidth  = faceW * 3.0f;
-        float torsoHeight = faceH * 3.5f;
 
-        float minX = faceCenterX - torsoWidth / 2.0f;
-        float maxX = faceCenterX + torsoWidth / 2.0f;
-        float minY = faceTop - faceH * 0.5f; // Bao gồm cả phần đầu
-        float maxY = faceBottom + torsoHeight;
 
-        // Trả về normalized [0,1]
-        float left   = Math.max(0f, minX / imgW);
-        float top    = Math.max(0f, minY / imgH);
-        float right  = Math.min(1f, maxX / imgW);
-        float bottom = Math.min(1f, maxY / imgH);
 
-        if (right <= left || bottom <= top || (right - left) < 0.05f) return null;
-        return new RectF(left, top, right, bottom);
-    }
 
-    /** Crop bitmap theo RectF normalized [0,1]. Trả về bitmap gốc nếu crop không hợp lệ. */
-    private Bitmap cropBitmapNormalized(Bitmap bitmap, RectF r) {
-        int x = Math.max(0, (int)(r.left   * bitmap.getWidth()));
-        int y = Math.max(0, (int)(r.top    * bitmap.getHeight()));
-        int w = (int)(r.width()  * bitmap.getWidth());
-        int h = (int)(r.height() * bitmap.getHeight());
-        w = Math.min(w, bitmap.getWidth()  - x);
-        h = Math.min(h, bitmap.getHeight() - y);
-        if (w <= 0 || h <= 0) return bitmap;
-        return Bitmap.createBitmap(bitmap, x, y, w, h);
-    }
 
-    /** Map toạ độ detection từ không gian crop → không gian ảnh gốc. */
-    private List<YoloDetector.Detection> mapDetections(
-            List<YoloDetector.Detection> detections, RectF region) {
-        List<YoloDetector.Detection> mapped = new ArrayList<>();
-        float rW = region.width(), rH = region.height();
-        for (YoloDetector.Detection d : detections) {
-            float l = region.left + d.bbox.left   * rW;
-            float t = region.top  + d.bbox.top    * rH;
-            float r = region.left + d.bbox.right  * rW;
-            float b = region.top  + d.bbox.bottom * rH;
-            mapped.add(new YoloDetector.Detection(
-                    new RectF(Math.max(0f, Math.min(1f, l)), Math.max(0f, Math.min(1f, t)),
-                              Math.max(0f, Math.min(1f, r)), Math.max(0f, Math.min(1f, b))),
-                    d.classId, d.confidence, d.label));
-        }
-        return mapped;
-    }
 
-    /** Global NMS: loại bbox trùng từ nhiều crop, dùng IoU threshold giống YoloDetector. */
-    private List<YoloDetector.Detection> applyGlobalNMS(List<YoloDetector.Detection> detections) {
-        if (detections.isEmpty()) return detections;
-        detections.sort((a, b) -> Float.compare(b.confidence, a.confidence));
-        List<YoloDetector.Detection> result = new ArrayList<>();
-        boolean[] suppressed = new boolean[detections.size()];
-        for (int i = 0; i < detections.size(); i++) {
-            if (suppressed[i]) continue;
-            result.add(detections.get(i));
-            for (int j = i + 1; j < detections.size(); j++) {
-                if (!suppressed[j] && computeIoU(detections.get(i).bbox, detections.get(j).bbox) >= NMS_IOU_THRESHOLD)
-                    suppressed[j] = true;
-            }
-        }
-        return result;
-    }
-
-    private float computeIoU(RectF a, RectF b) {
-        float iL = Math.max(a.left, b.left), iT = Math.max(a.top, b.top);
-        float iR = Math.min(a.right, b.right), iB = Math.min(a.bottom, b.bottom);
-        if (iR <= iL || iB <= iT) return 0f;
-        float inter = (iR - iL) * (iB - iT);
-        return inter / (a.width() * a.height() + b.width() * b.height() - inter);
-    }
 
     private String[] loadLabels() {
         List<String> labelList = new ArrayList<>();
