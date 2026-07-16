@@ -42,7 +42,7 @@ import java.util.List;
 public class YoloDetector {
 
     private static final String TAG = "YoloDetector";
-    private static final String MODEL_FILE = "best_int8.tflite";
+    private static final String MODEL_FILE = "seatbelt_detection.tflite";
 
     // Input size của model (YOLOv8 mặc định 640x640)
     public static final int INPUT_SIZE = 640;

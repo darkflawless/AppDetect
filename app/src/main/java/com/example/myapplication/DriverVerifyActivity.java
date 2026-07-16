@@ -50,7 +50,7 @@ public class DriverVerifyActivity extends AppCompatActivity {
     private static final int REQUEST_CAMERA = 100;
     private static final long VERIFY_INTERVAL_MS = 2000L; 
 
-    private static final String BASE_URL = "http://192.168.5.107:8000";
+    private static final String BASE_URL = "http://10.32.238.110:8000";
 
     private PreviewView previewView;
     private TextView tvStatus;
