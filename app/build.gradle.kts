@@ -96,4 +96,7 @@ dependencies {
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
     // Gson
     implementation("com.google.code.gson:gson:2.10.1")
+    // OkHttp để làm WebSocket client
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
 }

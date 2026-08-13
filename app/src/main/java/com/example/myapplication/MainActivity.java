@@ -66,11 +66,11 @@ public class MainActivity extends AppCompatActivity {
     // Detector + Threading
     private YoloDetector detector;
     private DrowsinessDetector drowsinessDetector;
-    private PersonDetector personDetector;                   // detect toàn thân người
+    private PersonDetector personDetector; // detect toàn thân người
     private ExecutorService cameraExecutor;
     private ExecutorService yoloExecutor;
     private ExecutorService drowsinessExecutor;
-    private ExecutorService personExecutor;                  // luồng riêng cho person detect
+    private ExecutorService personExecutor; // luồng riêng cho person detect
 
     // Camera state
     private int lensFacing = CameraSelector.LENS_FACING_FRONT;
@@ -93,7 +93,13 @@ public class MainActivity extends AppCompatActivity {
     // Labels
     private String[] labels;
 
+    // ── WebSocket + UDP Streaming ─────────────────────────────────────────────
+    private static final String BACKEND_IP = "192.168.42.222";
+    private static final int UDP_PORT = 9090;
+    private static final long DRIVER_ID = 1L; // ← ĐỔI thành driverId đăng nhập
 
+    private AppWebSocketClient wsClient;
+    private UdpFrameSender udpSender;
 
     private final ActivityResultLauncher<String> cameraPermissionLauncher = registerForActivityResult(
             new ActivityResultContracts.RequestPermission(), granted -> {
@@ -141,17 +147,17 @@ public class MainActivity extends AppCompatActivity {
 
         labels = loadLabels();
 
-        cameraExecutor    = Executors.newSingleThreadExecutor();
-        yoloExecutor      = Executors.newSingleThreadExecutor();
+        cameraExecutor = Executors.newSingleThreadExecutor();
+        yoloExecutor = Executors.newSingleThreadExecutor();
         drowsinessExecutor = Executors.newSingleThreadExecutor();
-        personExecutor    = Executors.newSingleThreadExecutor();
+        personExecutor = Executors.newSingleThreadExecutor();
 
         // Load tất cả models trên background thread
         cameraExecutor.execute(() -> {
             try {
                 drowsinessDetector = new DrowsinessDetector(this);
-                detector           = new YoloDetector(this, labels);
-                personDetector     = new PersonDetector(this);
+                detector = new YoloDetector(this, labels);
+                personDetector = new PersonDetector(this);
 
                 runOnUiThread(() -> {
                     btnStartTrip.setEnabled(true);
@@ -165,6 +171,35 @@ public class MainActivity extends AppCompatActivity {
                 });
             }
         });
+
+        // ── ② Khởi tạo UDP sender + WebSocket client ─────────────────────────
+        udpSender = new UdpFrameSender(BACKEND_IP, UDP_PORT, DRIVER_ID);
+
+        wsClient = new AppWebSocketClient(BACKEND_IP, DRIVER_ID, new AppWebSocketClient.StreamCommandListener() {
+            @Override
+            public void onStartStream() {
+                udpSender.startStreaming();
+                Log.i(TAG, "✅ Nhận lệnh START_STREAM → bắt đầu gửi camera");
+            }
+
+            @Override
+            public void onStopStream() {
+                udpSender.stopStreaming();
+                Log.i(TAG, "⏹ Nhận lệnh STOP_STREAM → dừng gửi camera");
+            }
+
+            @Override
+            public void onConnected() {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                        "Đã kết nối Backend", Toast.LENGTH_SHORT).show());
+            }
+
+            @Override
+            public void onDisconnected() {
+                Log.w(TAG, "Mất kết nối Backend, đang thử lại...");
+            }
+        });
+        wsClient.connect();
     }
 
     private void checkAndStartCamera() {
@@ -228,7 +263,10 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-
+            // ── ③ Gửi frame lên Backend nếu Admin đang yêu cầu xem ───────────
+            if (udpSender != null) {
+                udpSender.sendFrame(bitmap);
+            }
 
             long timestampMs = imageProxy.getImageInfo().getTimestamp() / 1000000;
             if (timestampMs <= lastTimestampMs) {
@@ -279,9 +317,9 @@ public class MainActivity extends AppCompatActivity {
             // ── Submit Seatbelt Detection (step 2): crop từng người ───────────────
             // Chạy khi: personFuture xong VÀ yoloFuture rảnh VÀ có ít nhất 1 người
             if (detector != null && pendingYoloFuture == null && !lastPersonBboxes.isEmpty()) {
-                final Bitmap fullBitmap  = bitmap.copy(bitmap.getConfig(), false);
-                final int    bmpW        = fullBitmap.getWidth();
-                final int    bmpH        = fullBitmap.getHeight();
+                final Bitmap fullBitmap = bitmap.copy(bitmap.getConfig(), false);
+                final int bmpW = fullBitmap.getWidth();
+                final int bmpH = fullBitmap.getHeight();
                 final List<android.graphics.RectF> persons = new ArrayList<>(lastPersonBboxes);
 
                 pendingYoloFuture = yoloExecutor.submit(() -> {
@@ -289,14 +327,15 @@ public class MainActivity extends AppCompatActivity {
 
                     for (android.graphics.RectF pBbox : persons) {
                         // Tính tọa độ pixel của người trong ảnh gốc
-                        int px1 = Math.max(0, (int)(pBbox.left   * bmpW));
-                        int py1 = Math.max(0, (int)(pBbox.top    * bmpH));
-                        int px2 = Math.min(bmpW, (int)(pBbox.right  * bmpW));
-                        int py2 = Math.min(bmpH, (int)(pBbox.bottom * bmpH));
-                        int pw  = px2 - px1;
-                        int ph  = py2 - py1;
+                        int px1 = Math.max(0, (int) (pBbox.left * bmpW));
+                        int py1 = Math.max(0, (int) (pBbox.top * bmpH));
+                        int px2 = Math.min(bmpW, (int) (pBbox.right * bmpW));
+                        int py2 = Math.min(bmpH, (int) (pBbox.bottom * bmpH));
+                        int pw = px2 - px1;
+                        int ph = py2 - py1;
 
-                        if (pw < 10 || ph < 10) continue;
+                        if (pw < 10 || ph < 10)
+                            continue;
 
                         // Crop ảnh người
                         Bitmap personCrop = Bitmap.createBitmap(fullBitmap, px1, py1, pw, ph);
@@ -309,10 +348,10 @@ public class MainActivity extends AppCompatActivity {
                         float personW = pBbox.width();
                         float personH = pBbox.height();
                         for (YoloDetector.Detection d : sbOnCrop) {
-                            float gL = pBbox.left + d.bbox.left   * personW;
-                            float gT = pBbox.top  + d.bbox.top    * personH;
-                            float gR = pBbox.left + d.bbox.right  * personW;
-                            float gB = pBbox.top  + d.bbox.bottom * personH;
+                            float gL = pBbox.left + d.bbox.left * personW;
+                            float gT = pBbox.top + d.bbox.top * personH;
+                            float gR = pBbox.left + d.bbox.right * personW;
+                            float gB = pBbox.top + d.bbox.bottom * personH;
                             allSb.add(new YoloDetector.Detection(
                                     new android.graphics.RectF(gL, gT, gR, gB),
                                     d.classId, d.confidence, d.label));
@@ -357,9 +396,12 @@ public class MainActivity extends AppCompatActivity {
             // ── Thêm bbox khuôn mặt vào overlay ──────────────────────────────────
             if (drowsinessResult.faceDetected && drowsinessResult.faceBbox != null) {
                 String faceLabel = "Face";
-                if (drowsinessResult.isDrowsy)       faceLabel = "Drowsy";
-                else if (drowsinessResult.isDistracted) faceLabel = "Distracted";
-                else if (drowsinessResult.isYawning)    faceLabel = "Yawning";
+                if (drowsinessResult.isDrowsy)
+                    faceLabel = "Drowsy";
+                else if (drowsinessResult.isDistracted)
+                    faceLabel = "Distracted";
+                else if (drowsinessResult.isYawning)
+                    faceLabel = "Yawning";
 
                 seatbeltDetections.add(new YoloDetector.Detection(
                         drowsinessResult.faceBbox, -1, 1.0f, faceLabel));
@@ -470,22 +512,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     private String[] loadLabels() {
         List<String> labelList = new ArrayList<>();
         try {
@@ -506,12 +532,24 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (cameraExecutor    != null) cameraExecutor.shutdown();
-        if (yoloExecutor      != null) yoloExecutor.shutdown();
-        if (drowsinessExecutor != null) drowsinessExecutor.shutdown();
-        if (personExecutor    != null) personExecutor.shutdown();
-        if (detector          != null) detector.close();
-        if (drowsinessDetector != null) drowsinessDetector.close();
-        if (personDetector    != null) personDetector.close();
+        if (cameraExecutor != null)
+            cameraExecutor.shutdown();
+        if (yoloExecutor != null)
+            yoloExecutor.shutdown();
+        if (drowsinessExecutor != null)
+            drowsinessExecutor.shutdown();
+        if (personExecutor != null)
+            personExecutor.shutdown();
+        if (detector != null)
+            detector.close();
+        if (drowsinessDetector != null)
+            drowsinessDetector.close();
+        if (personDetector != null)
+            personDetector.close();
+        // ── ④ Dọn dẹp WebSocket + UDP ────────────────────────────────────────
+        if (wsClient != null)
+            wsClient.disconnect();
+        if (udpSender != null)
+            udpSender.close();
     }
 }

@@ -18,18 +18,6 @@ import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 
-/**
- * DrowsinessDetector — phát hiện ngủ gật dựa trên EAR và MAR.
- *
- * Kiến trúc 2 bước:
- * Bước 1: TFLite model tự train (face_detection.tflite) → phát hiện vùng khuôn
- * mặt (YOLO)
- * Bước 2: ML Kit FaceDetection (CONTOUR_MODE_ALL) → trích xuất landmark contour
- * mắt/môi
- *
- * EAR = Eye Aspect Ratio: mắt nhắm → EAR thấp
- * MAR = Mouth Aspect Ratio: miệng há → MAR cao
- */
 public class DrowsinessDetector {
 
     private static final String TAG = "DrowsinessDetector";
@@ -105,7 +93,7 @@ public class DrowsinessDetector {
         DrowsinessResult result = new DrowsinessResult();
 
         try {
-            // ── Bước 1: Crop vùng tài xế (1/3 bên trái frame) ───────────────
+            // ── Bước 1: Crop vùng tài xế (1/2 bên trái frame) ───────────────
             // Tài xế luôn ngồi bên trái (từ góc nhìn camera hướng vào cabin)
             Bitmap driverRegion = cropDriverRegion(bitmap);
 
@@ -137,7 +125,7 @@ public class DrowsinessDetector {
                 firstFaceMissingTime = 0;
             }
 
-            // Map bbox từ tọa độ vùng crop (1/3 trái) → tọa độ full frame để vẽ UI đúng
+            // Map bbox từ tọa độ vùng crop (1/2 trái) → tọa độ full frame để vẽ UI đúng
             RectF faceBboxFull = mapBboxToFullFrame(faceBboxInCrop);
 
             // Tính box đã thêm padding để hiển thị lên màn hình
@@ -239,7 +227,7 @@ public class DrowsinessDetector {
     }
 
     // -------------------------------------------------------------------------
-    // cropDriverRegion: Crop 1/3 bên trái của frame để lấy vùng ghế lái
+    // cropDriverRegion: Crop 1/2 bên trái của frame để lấy vùng ghế lái
     // -------------------------------------------------------------------------
     private Bitmap cropDriverRegion(Bitmap bitmap) {
         int cropW = (int) (bitmap.getWidth() * DRIVER_REGION_FRACTION);
@@ -248,7 +236,7 @@ public class DrowsinessDetector {
     }
 
     // -------------------------------------------------------------------------
-    // mapBboxToFullFrame: Map bbox từ tọa độ vùng crop (1/3 trái) → full frame
+    // mapBboxToFullFrame: Map bbox từ tọa độ vùng crop (1/2 trái) → full frame
     // Trục X được scale theo DRIVER_REGION_FRACTION, trục Y giữ nguyên
     // -------------------------------------------------------------------------
     private RectF mapBboxToFullFrame(RectF bboxInCrop) {
