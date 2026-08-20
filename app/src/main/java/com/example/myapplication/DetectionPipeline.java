@@ -129,6 +129,7 @@ public class DetectionPipeline {
             pendingYoloFuture = yoloExecutor.submit(() -> {
                 List<SeatBeltDetector.Detection> allSb = new ArrayList<>();
 
+                int pIdx = 1;
                 for (RectF pBbox : persons) {
                     // Crop người từ ảnh gốc sắc nét với 8% margin
                     ImageUtils.CropResult crop = ImageUtils.cropPersonWithMargin(fullBitmap, pBbox, 0.08f);
@@ -149,8 +150,9 @@ public class DetectionPipeline {
                                 d.classId, d.confidence, d.label));
                     }
 
-                    // Thêm bbox người vào overlay
-                    allSb.add(new SeatBeltDetector.Detection(new RectF(pBbox), -2, 1.0f, "Person"));
+                    // Thêm bbox người vào overlay (P1, P2, P3...)
+                    allSb.add(new SeatBeltDetector.Detection(new RectF(pBbox), -2, 1.0f, "P" + pIdx));
+                    pIdx++;
                 }
 
                 fullBitmap.recycle();

@@ -105,12 +105,18 @@ public class BoundingBoxOverlay extends View {
         for (SeatBeltDetector.Detection det : detections) {
             String lower = det.label.toLowerCase();
             int color;
-            if (lower.equals("belt") || lower.equals("seatbelt") || lower.equals("face")) {
-                color = COLOR_BELT; // Xanh lá
+            if (lower.startsWith("person") || lower.startsWith("p")) {
+                color = Color.parseColor("#FFD600"); // Vàng cho Person
+            } else if (lower.contains("belt") && !lower.contains("no")) {
+                color = COLOR_BELT; // Xanh lá sáng
+            } else if (lower.contains("no-belt") || lower.contains("no_belt")) {
+                color = COLOR_NO_BELT; // Đỏ sáng
+            } else if (lower.contains("face")) {
+                color = Color.parseColor("#00E5FF"); // Cyan cho Face
             } else if (lower.equals("yawning")) {
                 color = Color.parseColor("#FF9100"); // Cam
             } else {
-                color = COLOR_NO_BELT; // Đỏ (no-belt hoặc drowsy)
+                color = COLOR_NO_BELT; // Đỏ (drowsy/distracted)
             }
 
             boxPaint.setColor(color);
@@ -134,14 +140,15 @@ public class BoundingBoxOverlay extends View {
 
             // --- Vẽ label phía trên box ---
             String prefix = "";
-            if (lower.equals("belt") || lower.equals("seatbelt")) prefix = "✓ ";
-            else if (lower.equals("no-belt") || lower.equals("no_belt")) prefix = "✗ ";
+            if (lower.contains("belt") && !lower.contains("no")) prefix = "✓ ";
+            else if (lower.contains("no")) prefix = "✗ ";
             else if (lower.equals("drowsy")) prefix = "😴 ";
             else if (lower.equals("yawning")) prefix = "🥱 ";
-            else if (lower.equals("face")) prefix = "👤 ";
+            else if (lower.contains("face")) prefix = "👤 ";
+            else if (lower.startsWith("person")) prefix = "👤 ";
 
             String labelText = prefix + det.label.toUpperCase();
-            if (!lower.equals("face") && !lower.equals("drowsy") && !lower.equals("yawning")) {
+            if (!lower.contains("face") && !lower.equals("drowsy") && !lower.equals("yawning") && !lower.startsWith("person")) {
                 labelText += "  " + String.format("%.0f%%", det.confidence * 100f);
             }
 

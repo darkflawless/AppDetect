@@ -42,7 +42,7 @@ public class PersonDetector {
     private static final String MODEL_FILE = "human_detection.tflite";
     private static final int INPUT_SIZE = 320; // phải khớp với imgsz khi export
     private static final int PERSON_CLASS = 0; // COCO class 0 = person
-    private static final float CONF_THRESH = 0.35f;
+    private static final float CONF_THRESH = 0.25f;
     private static final float IOU_THRESH = 0.45f;
 
     private final Interpreter interpreter;
