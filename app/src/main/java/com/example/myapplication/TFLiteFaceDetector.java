@@ -28,7 +28,7 @@ import java.util.List;
  * Mỗi detection: [cx, cy, w, h, confidence] (YOLO format)
  * cx/cy/w/h có thể là pixel (0-640) hoặc normalized (0-1) — tự phát hiện.
  *
- * Pattern tương tự YoloDetector: GPU Delegate, pre-allocated buffer, NMS.
+ * Pattern tương tự SeatBeltDetector: GPU Delegate, pre-allocated buffer, NMS.
  */
 public class TFLiteFaceDetector {
 

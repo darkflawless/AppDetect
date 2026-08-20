@@ -25,7 +25,7 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * YoloDetector - Chạy model YOLOv8 TFLite để phát hiện dây an toàn.
+ * SeatBeltDetector - Chạy model YOLOv8 TFLite để phát hiện dây an toàn.
  *
  * Output của YOLOv8 TFLite detection thường có shape: [1, num_classes+4, 8400]
  * Với 2 class (belt, no-belt) → [1, 6, 8400]
@@ -43,9 +43,9 @@ import java.util.List;
  * - Pre-allocated ByteBuffer & output array (tái dùng mỗi frame, tránh GC)
  * - Scaled bitmap tái dùng
  */
-public class YoloDetector {
+public class SeatBeltDetector {
 
-    private static final String TAG = "YoloDetector";
+    private static final String TAG = "SeatBeltDetector";
     private static final String MODEL_FILE = "seatbelt_detection.tflite";
 
     // Input size của model (YOLOv8 mặc định 640x640)
@@ -89,7 +89,7 @@ public class YoloDetector {
     // --------------------------------------------------------
     // Constructor
     // --------------------------------------------------------
-    public YoloDetector(Context context, String[] labels) throws IOException {
+    public SeatBeltDetector(Context context, String[] labels) throws IOException {
         this.labels = labels;
 
         // Load model dưới dạng MappedByteBuffer (memory-mapped → không copy vào heap)
@@ -224,7 +224,7 @@ public class YoloDetector {
     private Bitmap createLetterboxBitmap(Bitmap src, int targetWidth, int targetHeight) {
         Bitmap dst = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(dst);
-        canvas.drawColor(Color.BLACK);
+        canvas.drawColor(Color.rgb(114, 114, 114));
 
         float scale = Math.min((float) targetWidth / src.getWidth(), (float) targetHeight / src.getHeight());
         float dx = (targetWidth - src.getWidth() * scale) / 2f;

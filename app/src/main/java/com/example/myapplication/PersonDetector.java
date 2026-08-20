@@ -29,7 +29,7 @@ import java.util.List;
  *
  * Pipeline mục tiêu:
  * full frame → PersonDetector → [person1_bbox, person2_bbox, ...]
- * → crop từng người → YoloDetector (seatbelt) trên mỗi crop
+ * → crop từng người → SeatBeltDetector (seatbelt) trên mỗi crop
  *
  * Output: List<RectF> — mỗi RectF là bbox người (normalized [0,1])
  *
@@ -172,7 +172,7 @@ public class PersonDetector {
     private Bitmap createLetterboxBitmap(Bitmap src, int targetWidth, int targetHeight) {
         Bitmap dst = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(dst);
-        canvas.drawColor(Color.BLACK);
+        canvas.drawColor(Color.rgb(114, 114, 114));
 
         float scale = Math.min((float) targetWidth / src.getWidth(), (float) targetHeight / src.getHeight());
         float dx = (targetWidth - src.getWidth() * scale) / 2f;

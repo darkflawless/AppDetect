@@ -22,7 +22,7 @@ public class BoundingBoxOverlay extends View {
     private static final int COLOR_BELT    = Color.parseColor("#00E676"); // Xanh lá sáng
     private static final int COLOR_NO_BELT = Color.parseColor("#FF1744"); // Đỏ sáng
 
-    private List<YoloDetector.Detection> detections = new ArrayList<>();
+    private List<SeatBeltDetector.Detection> detections = new ArrayList<>();
 
     private final Paint boxPaint    = new Paint();
     private final Paint labelBgPaint = new Paint();
@@ -68,7 +68,12 @@ public class BoundingBoxOverlay extends View {
     /**
      * Gọi từ Main Thread (hoặc postInvalidate) khi có detection mới.
      */
-    public void setDetections(List<YoloDetector.Detection> newDetections, int imgW, int imgH) {
+    public void setDetections(List<SeatBeltDetector.Detection> newDetections) {
+        this.detections = new ArrayList<>(newDetections);
+        postInvalidate(); // Yêu cầu vẽ lại trên UI thread
+    }
+
+    public void setDetections(List<SeatBeltDetector.Detection> newDetections, int imgW, int imgH) {
         this.detections = new ArrayList<>(newDetections);
         this.imgW = imgW;
         this.imgH = imgH;
@@ -97,7 +102,7 @@ public class BoundingBoxOverlay extends View {
         float dx = (viewW - scaledW) / 2f;
         float dy = (viewH - scaledH) / 2f;
 
-        for (YoloDetector.Detection det : detections) {
+        for (SeatBeltDetector.Detection det : detections) {
             String lower = det.label.toLowerCase();
             int color;
             if (lower.equals("belt") || lower.equals("seatbelt") || lower.equals("face")) {
