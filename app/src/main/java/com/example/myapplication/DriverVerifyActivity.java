@@ -48,7 +48,7 @@ public class DriverVerifyActivity extends AppCompatActivity {
 
     private static final String TAG = "DriverVerify";
     private static final int REQUEST_CAMERA = 100;
-    private static final long VERIFY_INTERVAL_MS = 2000L; 
+    private static final long VERIFY_INTERVAL_MS = 2000L;
 
     private static final String BASE_URL = "http://10.32.238.110:8000";
 
@@ -151,7 +151,14 @@ public class DriverVerifyActivity extends AppCompatActivity {
         hasNavigated = false;
         btnVerify.setText("Dừng xác thực");
         tvStatus.setText("Đang xác thực...");
-        handler.post(verifyRunnable);
+
+        // --- CHẾ ĐỘ BYPASS: Chuyển màn hình ngay lập tức ---
+        VerifyResponse bypassResponse = new VerifyResponse();
+        bypassResponse.verified = true;
+        handleVerifyResult(bypassResponse);
+
+        // Ngắt không chạy luồng chụp ảnh thật
+        // handler.post(verifyRunnable);
     }
 
     private void stopVerifying() {
@@ -230,10 +237,10 @@ public class DriverVerifyActivity extends AppCompatActivity {
                 stopVerifying();
 
                 Toast.makeText(this, "Xác thực thành công!", Toast.LENGTH_SHORT).show();
-                
+
                 Intent intent = new Intent(DriverVerifyActivity.this, MainActivity.class);
                 startActivity(intent);
-                finish(); 
+                finish();
             } else {
                 tvStatus.setText("✗ " + response.message);
                 tvStatus.setTextColor(ContextCompat.getColor(this, android.R.color.holo_red_dark));

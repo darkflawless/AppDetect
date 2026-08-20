@@ -3,6 +3,10 @@ package com.example.myapplication;
 import android.content.Context;
 import android.content.res.AssetFileDescriptor;
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Matrix;
+import android.graphics.Paint;
 import android.graphics.RectF;
 import android.util.Log;
 
@@ -155,8 +159,11 @@ public class YoloDetector {
     // Public API: nhận Bitmap, trả về list Detection
     // --------------------------------------------------------
     public List<Detection> detect(Bitmap bitmap) {
-        // 1. Resize về INPUT_SIZE x INPUT_SIZE
-        Bitmap resized = Bitmap.createScaledBitmap(bitmap, INPUT_SIZE, INPUT_SIZE, true);
+        int origW = bitmap.getWidth();
+        int origH = bitmap.getHeight();
+
+        // 1. Resize về INPUT_SIZE x INPUT_SIZE với letterbox
+        Bitmap resized = createLetterboxBitmap(bitmap, INPUT_SIZE, INPUT_SIZE);
 
         // 2. Chuyển Bitmap → ByteBuffer float32 [1, H, W, 3] (tái dùng buffer)
         fillInputBuffer(resized);
@@ -165,7 +172,7 @@ public class YoloDetector {
         interpreter.run(inputBuffer, outputBuffer);
 
         // 4. Parse kết quả
-        List<Detection> candidates = parseOutput(outputBuffer);
+        List<Detection> candidates = parseOutput(outputBuffer, origW, origH);
 
         // 5. NMS để loại bỏ box trùng lặp
         return applyNMS(candidates);
@@ -212,14 +219,40 @@ public class YoloDetector {
     }
 
     // --------------------------------------------------------
+    // Private: Resize với Letterbox (giữ nguyên tỷ lệ)
+    // --------------------------------------------------------
+    private Bitmap createLetterboxBitmap(Bitmap src, int targetWidth, int targetHeight) {
+        Bitmap dst = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(dst);
+        canvas.drawColor(Color.BLACK);
+
+        float scale = Math.min((float) targetWidth / src.getWidth(), (float) targetHeight / src.getHeight());
+        float dx = (targetWidth - src.getWidth() * scale) / 2f;
+        float dy = (targetHeight - src.getHeight() * scale) / 2f;
+
+        Matrix matrix = new Matrix();
+        matrix.postScale(scale, scale);
+        matrix.postTranslate(dx, dy);
+
+        Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
+        canvas.drawBitmap(src, matrix, paint);
+        return dst;
+    }
+
+    // --------------------------------------------------------
     // Private: Parse output tensor → list Detection
     // --------------------------------------------------------
-    private List<Detection> parseOutput(float[][][] output) {
+    private List<Detection> parseOutput(float[][][] output, int origW, int origH) {
         List<Detection> candidates = new ArrayList<>();
 
         // Tự động phán đoán tọa độ là pixel (0-640) hay normalized (0-1)
         float sampleCx = output[0][0][0];
         boolean needNormalize = sampleCx > 1.5f;
+
+        // Tính toán thông số letterbox để scale ngược lại
+        float scale = Math.min((float) INPUT_SIZE / origW, (float) INPUT_SIZE / origH);
+        float padX = (INPUT_SIZE - origW * scale) / 2f;
+        float padY = (INPUT_SIZE - origH * scale) / 2f;
 
         for (int i = 0; i < numBoxes; i++) {
             float cx, cy, w, h;
@@ -259,11 +292,23 @@ public class YoloDetector {
             if (bestScore < CONFIDENCE_THRESHOLD)
                 continue;
 
-            // Chuyển về tọa độ normalized [0,1]
-            float normCx = needNormalize ? cx / INPUT_SIZE : cx;
-            float normCy = needNormalize ? cy / INPUT_SIZE : cy;
-            float normW = needNormalize ? w / INPUT_SIZE : w;
-            float normH = needNormalize ? h / INPUT_SIZE : h;
+            // Chuyển về tọa độ pixel trong 640x640 letterbox image
+            float px = needNormalize ? cx : cx * INPUT_SIZE;
+            float py = needNormalize ? cy : cy * INPUT_SIZE;
+            float pw = needNormalize ? w : w * INPUT_SIZE;
+            float ph = needNormalize ? h : h * INPUT_SIZE;
+            
+            // Map back to original image pixel coordinates
+            float origPx = (px - padX) / scale;
+            float origPy = (py - padY) / scale;
+            float origPw = pw / scale;
+            float origPh = ph / scale;
+
+            // Convert to normalized coordinates [0,1] for original image
+            float normCx = origPx / origW;
+            float normCy = origPy / origH;
+            float normW = origPw / origW;
+            float normH = origPh / origH;
 
             // cx,cy,w,h → x1,y1,x2,y2
             float x1 = normCx - normW / 2f;

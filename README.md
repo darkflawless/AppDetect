@@ -35,3 +35,25 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 * Đảm bảo điện thoại **không** dùng 4G/5G khi đang test nội bộ.
 * Đảm bảo Firewall (tường lửa) trên máy tính không chặn cổng `8000`.
 * Bạn có thể kiểm tra bằng cách mở trình duyệt trên điện thoại và truy cập thử vào địa chỉ IP đó (Ví dụ: `http://192.168.1.15:8000/docs`). Nếu hiện trang tài liệu FastAPI là kết nối đã thông suốt.
+
+
+API : .
+
+📱 Danh Sách API Cho Ứng Dụng Điện Thoại (Mobile App)
+1. 🔐 Đăng Nhập & Xác Thực (Authentication)
+POST /auth/login: Tài xế / Nhân viên đăng nhập từ điện thoại (nhận JWT Token).
+2. 📍 Gửi Tọa Độ & Dữ Liệu An Toàn Từ Điện Thoại Lên Server
+POST /vehicle-logs: Điện thoại gửi tọa độ GPS định kỳ (lat, lng, timeVehicleLog).
+POST /somnolence-records: Gửi cảnh báo phát hiện buồn ngủ (từ camera AI trên điện thoại).
+POST /alcohol-records: Gửi kết quả đo nồng độ cồn của tài xế (alcoholLevel, measurementTime).
+POST /incidents: Tài xế báo cáo sự cố trên đường (Tai nạn, hỏng xe, tắc đường...).
+POST /violations: Báo cáo vi phạm 
+POST /fuel-logs: Tài xế nhập nhật ký đổ xăng (liter, unitPrice, station).
+3. 🛣️ Quản Lý Chuyến Đi (Tài Xế Thao Tác Trên App)
+GET /assignments: Xem danh sách xe & chuyến đi được phân công cho tài xế.
+GET /trips/{id}: Xem chi tiết lộ trình chuyến đi hiện tại.
+POST /trip-progress: Cập nhật tiến độ chuyến đi (bấm nút "Đến trạm" / "Rời trạm").
+PUT /trips/{id}: Cập nhật trạng thái chuyến đi (IN_PROGRESS -> COMPLETED).
+4. 🛠️ Báo Cáo Bảo Trì & Xe
+GET /vehicles/{id}: Xem thông tin xe tài xế đang lái.
+POST /maintenance-records: Tài xế / Kỹ thuật gửi yêu cầu/nhật ký bảo trì xe.

@@ -2,12 +2,6 @@ plugins {
     alias(libs.plugins.android.application)
 }
 
-java {
-    toolchain {
-        languageVersion.set(JavaLanguageVersion.of(21))
-    }
-}
-
 android {
     namespace = "com.example.myapplication"
     // Giữ nguyên cấu hình SDK của bạn
@@ -77,6 +71,9 @@ dependencies {
     // Dùng Google Play Services: không bundle .so vào APK → không bao giờ lỗi 16KB
     implementation(libs.mlkit.face.detection)
     implementation(libs.mlkit.pose.detection)
+
+    // Location API
+    implementation(libs.play.services.location)
 
     // Networking
     implementation(libs.okhttp)

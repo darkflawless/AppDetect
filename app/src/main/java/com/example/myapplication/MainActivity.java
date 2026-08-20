@@ -1,15 +1,12 @@
 package com.example.myapplication;
 
 import android.Manifest;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.graphics.Color;
-import android.graphics.ImageFormat;
-import android.graphics.Matrix;
-import android.graphics.Rect;
-import android.graphics.YuvImage;
+import android.os.Build;
 import android.os.Bundle;
+import android.util.Base64;
 import android.util.Log;
 import android.widget.Button;
 import android.widget.ImageButton;
@@ -19,47 +16,33 @@ import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
-import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.camera.core.CameraSelector;
-import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.ImageProxy;
-import androidx.camera.core.Preview;
-import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.view.PreviewView;
 import androidx.core.content.ContextCompat;
 
-import com.google.common.util.concurrent.ListenableFuture;
+import com.example.myapplication.model.BoundingBoxDto;
+import com.example.myapplication.model.SomnolenceRecordRequest;
+import com.example.myapplication.model.ViolationReportRequest;
+import com.example.myapplication.network.ApiClient;
+import com.example.myapplication.network.LocationService;
 
 import java.io.ByteArrayOutputStream;
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.nio.ByteBuffer;
-import java.util.ArrayList;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.List;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-
-// Calibration phase dùng TFLite face_detection.tflite (không cần ML Kit)
-import android.graphics.RectF;
+import java.util.Locale;
+import java.util.TimeZone;
 
 public class MainActivity extends AppCompatActivity {
 
-    private static final String TAG = "AppDetectMain";
+    private static final String TAG = "MainActivity";
+    private static final long ALERT_COOLDOWN_MS = 15000L; // 15 giây cooldown chống spam API
 
-    // UI Views
-    private PreviewView cameraPreview;
-    private BoundingBoxOverlay bboxOverlay;
-    private android.view.View redFlashOverlay;
-    private TextView statusIcon;
-    private TextView statusText;
-    private TextView confidenceText;
-    private TextView fpsText;
-    private ImageButton btnSwitchCamera;
+    private CameraManager cameraManager;
+    private DetectionPipeline detectionPipeline;
+    private MainAlertUIManager uiManager;
 
-    // Start Trip UI
     private LinearLayout startOverlay;
     private Button btnStartTrip;
 
@@ -76,14 +59,14 @@ public class MainActivity extends AppCompatActivity {
     private int lensFacing = CameraSelector.LENS_FACING_FRONT;
     private boolean isTripStarted = false;
 
-    // FPS tracking
-    private long lastFrameTime = 0L;
-    private boolean isProcessing = false;
+    private long lastSomnolenceAlertTime = 0L;
+    private long lastSeatbeltAlertTime = 0L;
 
-    // Pending futures
-    private java.util.concurrent.Future<List<YoloDetector.Detection>> pendingYoloFuture = null;
-    private java.util.concurrent.Future<DrowsinessDetector.DrowsinessResult> pendingDrowsinessFuture = null;
-    private java.util.concurrent.Future<List<android.graphics.RectF>> pendingPersonFuture = null;
+    // Permissions launcher (Camera + Location)
+    private final ActivityResultLauncher<String[]> permissionsLauncher = registerForActivityResult(
+            new ActivityResultContracts.RequestMultiplePermissions(), permissions -> {
+                Boolean cameraGranted = permissions.getOrDefault(Manifest.permission.CAMERA, false);
+                Boolean locationGranted = permissions.getOrDefault(Manifest.permission.ACCESS_FINE_LOCATION, false);
 
     // Kết quả mới nhất
     private List<YoloDetector.Detection> lastYoloDetections = new ArrayList<>();
@@ -107,8 +90,12 @@ public class MainActivity extends AppCompatActivity {
                     startCamera();
                 } else {
                     Toast.makeText(this, "App cần quyền camera để hoạt động!", Toast.LENGTH_LONG).show();
-                    statusText.setText("Cần cấp quyền camera");
-                    statusIcon.setText("🚫");
+                }
+
+                if (Boolean.TRUE.equals(locationGranted)) {
+                    startLocationService();
+                } else {
+                    Toast.makeText(this, "Chưa cấp quyền vị trí GPS!", Toast.LENGTH_SHORT).show();
                 }
             });
 
@@ -117,32 +104,33 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // Bind views
-        cameraPreview = findViewById(R.id.camera_preview);
-        bboxOverlay = findViewById(R.id.bbox_overlay);
-        redFlashOverlay = findViewById(R.id.red_flash_overlay);
-        statusIcon = findViewById(R.id.status_icon);
-        statusText = findViewById(R.id.status_text);
-        confidenceText = findViewById(R.id.confidence_text);
-        fpsText = findViewById(R.id.fps_text);
+        // Bind Views
+        PreviewView cameraPreview = findViewById(R.id.camera_preview);
+        BoundingBoxOverlay bboxOverlay = findViewById(R.id.bbox_overlay);
+        android.view.View redFlashOverlay = findViewById(R.id.red_flash_overlay);
+        TextView statusIcon = findViewById(R.id.status_icon);
+        TextView statusText = findViewById(R.id.status_text);
+        TextView confidenceText = findViewById(R.id.confidence_text);
+        TextView fpsText = findViewById(R.id.fps_text);
         btnSwitchCamera = findViewById(R.id.btn_switch_camera);
-
-        // Start Trip views
         startOverlay = findViewById(R.id.start_overlay);
         btnStartTrip = findViewById(R.id.btn_start_trip);
 
+        // Managers
+        cameraManager = new CameraManager(this, cameraPreview);
+        uiManager = new MainAlertUIManager(bboxOverlay, redFlashOverlay, statusIcon, statusText, confidenceText, fpsText);
+        detectionPipeline = new DetectionPipeline(this);
+
         btnSwitchCamera.setOnClickListener(v -> {
-            lensFacing = (lensFacing == CameraSelector.LENS_FACING_BACK)
-                    ? CameraSelector.LENS_FACING_FRONT
-                    : CameraSelector.LENS_FACING_BACK;
-            if (isTripStarted)
-                startCamera();
+            if (isTripStarted) {
+                cameraManager.switchCamera(detectionPipeline.getCameraExecutor(), this::onAnalyzeFrame);
+            }
         });
 
         btnStartTrip.setOnClickListener(v -> {
             isTripStarted = true;
             startOverlay.setVisibility(android.view.View.GONE);
-            checkAndStartCamera();
+            checkPermissionsAndStart();
         });
 
         labels = loadLabels();
@@ -202,48 +190,36 @@ public class MainActivity extends AppCompatActivity {
         wsClient.connect();
     }
 
-    private void checkAndStartCamera() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-            startCamera();
+    private void checkPermissionsAndStart() {
+        String[] reqPermissions;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            reqPermissions = new String[]{
+                    Manifest.permission.CAMERA,
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                    Manifest.permission.POST_NOTIFICATIONS
+            };
         } else {
-            cameraPermissionLauncher.launch(Manifest.permission.CAMERA);
+            reqPermissions = new String[]{
+                    Manifest.permission.CAMERA,
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+            };
+        }
+
+        boolean hasCamera = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
+        boolean hasLocation = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+
+        if (hasCamera && hasLocation) {
+            startCamera();
+            startLocationService();
+        } else {
+            permissionsLauncher.launch(reqPermissions);
         }
     }
 
     private void startCamera() {
-        ListenableFuture<ProcessCameraProvider> cameraProviderFuture = ProcessCameraProvider.getInstance(this);
-
-        cameraProviderFuture.addListener(() -> {
-            try {
-                ProcessCameraProvider cameraProvider = cameraProviderFuture.get();
-
-                Preview preview = new Preview.Builder().build();
-                preview.setSurfaceProvider(cameraPreview.getSurfaceProvider());
-
-                ImageAnalysis imageAnalysis = new ImageAnalysis.Builder()
-                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                        .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
-                        .build();
-
-                imageAnalysis.setAnalyzer(cameraExecutor, imageProxy -> {
-                    if (isProcessing) {
-                        imageProxy.close();
-                        return;
-                    }
-                    analyzeFrame(imageProxy);
-                });
-
-                CameraSelector cameraSelector = new CameraSelector.Builder()
-                        .requireLensFacing(lensFacing)
-                        .build();
-
-                cameraProvider.unbindAll();
-                cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageAnalysis);
-
-            } catch (ExecutionException | InterruptedException e) {
-                Log.e(TAG, "Camera start failed", e);
-            }
-        }, ContextCompat.getMainExecutor(this));
+        cameraManager.startCamera(detectionPipeline.getCameraExecutor(), this::onAnalyzeFrame);
     }
 
     private long lastTimestampMs = -1;
@@ -478,35 +454,81 @@ public class MainActivity extends AppCompatActivity {
             statusText.setTextColor(Color.RED);
             confidenceText.setText(String.format("Hãy nhìn thẳng! (Góc quay: %.0f°)", dResult.headEulerY));
         } else {
-            redFlashOverlay.setVisibility(android.view.View.GONE);
+            startService(intent);
+        }
+        Log.d(TAG, "LocationService started from MainActivity");
+    }
 
-            if (dResult.faceDetected && dResult.isYawning) {
-                statusIcon.setText("🥱");
-                statusText.setText("CẢNH BÁO - Đang ngáp!");
-                statusText.setTextColor(Color.parseColor("#FF9100"));
-                confidenceText.setText("Bạn có vẻ đang mệt mỏi.");
-            } else if (bestNoBelt != null) {
-                statusIcon.setText("⚠️");
-                statusText.setText("CẢNH BÁO - Không đeo dây!");
-                statusText.setTextColor(Color.RED);
-                confidenceText.setText(String.format("Độ tin cậy: %.1f%%", bestNoBelt.confidence * 100f));
-            } else if (bestBelt != null) {
-                statusIcon.setText("✅");
-                statusText.setText("AN TOÀN - Đang đeo dây");
-                statusText.setTextColor(Color.GREEN);
-                confidenceText.setText(String.format("Độ tin cậy: %.1f%%", bestBelt.confidence * 100f));
-            } else {
-                statusIcon.setText("🔍");
-                statusText.setText(
-                        dResult.faceDetected ? "Đã thấy mặt - Đang theo dõi..." : "Đang tìm kiếm khuôn mặt...");
-                statusText.setTextColor(Color.WHITE);
+    private void stopLocationService() {
+        Intent intent = new Intent(this, LocationService.class);
+        stopService(intent);
+    }
 
-                if (dResult.faceDetected) {
-                    // Hiện trạng thái bình thường
-                    confidenceText.setText(String.format("EAR: %.2f | Yaw: %.0f°",
-                            dResult.ear, dResult.headEulerY));
-                } else {
-                    confidenceText.setText("");
+    private void onAnalyzeFrame(ImageProxy imageProxy) {
+        detectionPipeline.processFrame(imageProxy, cameraManager, (detections, dResult, fps, imgW, imgH) -> {
+            // 1. Cập nhật UI
+            runOnUiThread(() -> uiManager.updateUI(detections, dResult, fps, imgW, imgH));
+
+            // 2. Kiểm tra và gửi API cảnh báo nếu có sự cố
+            checkAndSendAlerts(detections, dResult);
+        });
+    }
+
+    private void checkAndSendAlerts(List<YoloDetector.Detection> detections, DrowsinessDetector.DrowsinessResult dResult) {
+        long now = System.currentTimeMillis();
+
+        // ── Xử lý cảnh báo Buồn ngủ / Mất tập trung / Không thấy mặt ──────────────────
+        if (dResult != null && (dResult.isDrowsy || dResult.isDistracted || dResult.isFaceMissing)) {
+            if (now - lastSomnolenceAlertTime >= ALERT_COOLDOWN_MS) {
+                lastSomnolenceAlertTime = now;
+
+                String eventType = "DROWSY";
+                if (dResult.isFaceMissing) eventType = "FACE_MISSING";
+                else if (dResult.isDistracted) eventType = "DISTRACTED";
+
+                SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US);
+                sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
+                String timestampStr = sdf.format(new Date());
+
+                SomnolenceRecordRequest req = new SomnolenceRecordRequest(
+                        eventType,
+                        dResult.ear,
+                        dResult.mar,
+                        dResult.closedEyeDurationMs,
+                        dResult.headEulerY,
+                        timestampStr,
+                        BoundingBoxDto.fromRectF(dResult.faceBbox),
+                        null // Tùy chọn chuyển Bitmap sang Base64
+                );
+
+                ApiClient.getInstance().postSomnolenceRecord(req, null);
+                Log.d(TAG, "Triggered Somnolence alert API: " + eventType);
+            }
+        }
+
+        // ── Xử lý vi phạm Không đeo dây an toàn ──────────────────────────────────────
+        if (detections != null) {
+            for (YoloDetector.Detection d : detections) {
+                if ((d.label.equalsIgnoreCase("no-seatbelt") || d.label.equalsIgnoreCase("no_belt")) && d.confidence > 0.6f) {
+                    if (now - lastSeatbeltAlertTime >= ALERT_COOLDOWN_MS) {
+                        lastSeatbeltAlertTime = now;
+
+                        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US);
+                        sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
+                        String timestampStr = sdf.format(new Date());
+
+                        ViolationReportRequest req = new ViolationReportRequest(
+                                "NO_SEATBELT",
+                                d.confidence,
+                                timestampStr,
+                                BoundingBoxDto.fromRectF(d.bbox),
+                                null
+                        );
+
+                        ApiClient.getInstance().postViolationReport(req, null);
+                        Log.d(TAG, "Triggered Seatbelt violation alert API: NO_SEATBELT");
+                    }
+                    break;
                 }
             }
         }

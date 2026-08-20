@@ -62,11 +62,16 @@ public class BoundingBoxOverlay extends View {
         labelPaint.setFakeBoldText(true);
     }
 
+    private int imgW = 480;
+    private int imgH = 640;
+
     /**
      * Gọi từ Main Thread (hoặc postInvalidate) khi có detection mới.
      */
-    public void setDetections(List<YoloDetector.Detection> newDetections) {
+    public void setDetections(List<YoloDetector.Detection> newDetections, int imgW, int imgH) {
         this.detections = new ArrayList<>(newDetections);
+        this.imgW = imgW;
+        this.imgH = imgH;
         postInvalidate(); // Yêu cầu vẽ lại trên UI thread
     }
 
@@ -84,6 +89,13 @@ public class BoundingBoxOverlay extends View {
 
         float viewW = getWidth();
         float viewH = getHeight();
+        
+        // Tính toán ma trận biến đổi FILL_CENTER (Giống với PreviewView)
+        float scale = Math.max(viewW / imgW, viewH / imgH);
+        float scaledW = imgW * scale;
+        float scaledH = imgH * scale;
+        float dx = (viewW - scaledW) / 2f;
+        float dy = (viewH - scaledH) / 2f;
 
         for (YoloDetector.Detection det : detections) {
             String lower = det.label.toLowerCase();
@@ -100,12 +112,12 @@ public class BoundingBoxOverlay extends View {
             cornerPaint.setColor(color);
             labelBgPaint.setColor(color);
 
-            // Chuyển tọa độ normalized [0,1] → pixel màn hình
+            // Chuyển tọa độ normalized [0,1] → pixel màn hình (có tính FILL_CENTER offset)
             RectF box = det.bbox;
-            float left   = box.left   * viewW;
-            float top    = box.top    * viewH;
-            float right  = box.right  * viewW;
-            float bottom = box.bottom * viewH;
+            float left   = box.left   * scaledW + dx;
+            float top    = box.top    * scaledH + dy;
+            float right  = box.right  * scaledW + dx;
+            float bottom = box.bottom * scaledH + dy;
 
             // Vẽ khung chính (bounding box)
             canvas.drawRect(left, top, right, bottom, boxPaint);

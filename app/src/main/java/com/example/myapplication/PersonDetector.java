@@ -3,6 +3,10 @@ package com.example.myapplication;
 import android.content.Context;
 import android.content.res.AssetFileDescriptor;
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Matrix;
+import android.graphics.Paint;
 import android.graphics.RectF;
 import android.util.Log;
 
@@ -111,8 +115,11 @@ public class PersonDetector {
      * @return List<RectF> — bbox người, tọa độ normalized [0,1]
      */
     public List<RectF> detectPersons(Bitmap bitmap) {
-        // 1. Resize về INPUT_SIZE
-        Bitmap resized = Bitmap.createScaledBitmap(bitmap, INPUT_SIZE, INPUT_SIZE, true);
+        int origW = bitmap.getWidth();
+        int origH = bitmap.getHeight();
+
+        // 1. Resize với Letterbox (giữ nguyên tỷ lệ, thêm viền đen)
+        Bitmap resized = createLetterboxBitmap(bitmap, INPUT_SIZE, INPUT_SIZE);
 
         // 2. Fill input buffer
         fillInput(resized);
@@ -120,8 +127,8 @@ public class PersonDetector {
         // 3. Inference
         interpreter.run(inputBuffer, outputBuffer);
 
-        // 4. Parse — chỉ lấy class 0 (person)
-        List<PersonDet> candidates = parsePersonOnly();
+        // 4. Parse
+        List<PersonDet> candidates = parsePersonOnly(origW, origH);
 
         // 5. NMS
         return nms(candidates);
@@ -162,16 +169,34 @@ public class PersonDetector {
         }
     }
 
-    /**
-     * Parse output, chỉ giữ lại box class 0 (person) có score cao nhất cho mỗi
-     * anchor.
-     */
-    private List<PersonDet> parsePersonOnly() {
+    private Bitmap createLetterboxBitmap(Bitmap src, int targetWidth, int targetHeight) {
+        Bitmap dst = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(dst);
+        canvas.drawColor(Color.BLACK);
+
+        float scale = Math.min((float) targetWidth / src.getWidth(), (float) targetHeight / src.getHeight());
+        float dx = (targetWidth - src.getWidth() * scale) / 2f;
+        float dy = (targetHeight - src.getHeight() * scale) / 2f;
+
+        Matrix matrix = new Matrix();
+        matrix.postScale(scale, scale);
+        matrix.postTranslate(dx, dy);
+
+        Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
+        canvas.drawBitmap(src, matrix, paint);
+        return dst;
+    }
+
+    private List<PersonDet> parsePersonOnly(int origW, int origH) {
         List<PersonDet> result = new ArrayList<>();
 
-        // Tự phát hiện tọa độ pixel hay normalized
         float sampleCx = outputBuffer[0][0][0];
         boolean needNorm = sampleCx > 1.5f;
+
+        // Tính toán thông số letterbox để scale ngược lại
+        float scale = Math.min((float) INPUT_SIZE / origW, (float) INPUT_SIZE / origH);
+        float padX = (INPUT_SIZE - origW * scale) / 2f;
+        float padY = (INPUT_SIZE - origH * scale) / 2f;
 
         for (int i = 0; i < numBoxes; i++) {
             float cx, cy, w, h, personScore;
@@ -198,11 +223,23 @@ public class PersonDetector {
             if (personScore < CONF_THRESH)
                 continue;
 
-            // Normalize nếu cần
-            float ncx = needNorm ? cx / INPUT_SIZE : cx;
-            float ncy = needNorm ? cy / INPUT_SIZE : cy;
-            float nw = needNorm ? w / INPUT_SIZE : w;
-            float nh = needNorm ? h / INPUT_SIZE : h;
+            // Convert to pixel coordinates in 320x320 letterbox image
+            float px = needNorm ? cx : cx * INPUT_SIZE;
+            float py = needNorm ? cy : cy * INPUT_SIZE;
+            float pw = needNorm ? w : w * INPUT_SIZE;
+            float ph = needNorm ? h : h * INPUT_SIZE;
+            
+            // Map back to original image pixel coordinates
+            float origPx = (px - padX) / scale;
+            float origPy = (py - padY) / scale;
+            float origPw = pw / scale;
+            float origPh = ph / scale;
+            
+            // Convert to normalized coordinates [0,1] for original image
+            float ncx = origPx / origW;
+            float ncy = origPy / origH;
+            float nw = origPw / origW;
+            float nh = origPh / origH;
 
             float x1 = Math.max(0f, Math.min(1f, ncx - nw / 2f));
             float y1 = Math.max(0f, Math.min(1f, ncy - nh / 2f));
