@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AppDetect Command Center — Trung Tâm Giám Sát Buồng Lái</title>
+    <!-- Leaflet CSS for Map -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #090d16;
+            --bg-card: rgba(18, 26, 43, 0.75);
+            --bg-card-hover: rgba(26, 38, 64, 0.85);
+            --border-card: rgba(255, 255, 255, 0.08);
+            --accent-blue: #3b82f6;
+            --accent-cyan: #06b6d4;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --accent-amber: #f59e0b;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.12) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(6, 182, 212, 0.08) 0px, transparent 50%);
+        }
+
+        /* ── Header ────────────────────────────────────────── */
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 28px;
+            background: rgba(13, 19, 33, 0.8);
+            backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--border-card);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand-icon {
+            width: 38px;
+            height: 38px;
+            background: linear-gradient(135deg, #2563eb, #06b6d4);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
+        }
+
+        .brand-text h1 {
+            font-size: 1.25rem;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            background: linear-gradient(to right, #fff, #93c5fd);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .brand-text p {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .status-pills {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .pill {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            border-radius: 999px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-card);
+        }
+
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .dot-green { background: var(--accent-green); box-shadow: 0 0 10px var(--accent-green); }
+        .dot-red { background: var(--accent-red); box-shadow: 0 0 10px var(--accent-red); }
+        .dot-amber { background: var(--accent-amber); box-shadow: 0 0 10px var(--accent-amber); }
+
+        /* ── Grid Layout ───────────────────────────────────── */
+        main {
+            flex: 1;
+            padding: 20px 28px;
+            display: grid;
+            grid-template-columns: 1.15fr 1fr;
+            grid-template-rows: auto auto;
+            gap: 20px;
+        }
+
+        .card {
+            background: var(--bg-card);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border-card);
+            border-radius: 16px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+            transition: all 0.2s ease;
+        }
+
+        .card:hover {
+            border-color: rgba(255, 255, 255, 0.15);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+
+        .card-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: #e2e8f0;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* ── Video Player Panel ────────────────────────────── */
+        .video-container {
+            position: relative;
+            width: 100%;
+            height: 380px;
+            background: #000;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #videoFeed {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .video-overlay-info {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            display: flex;
+            gap: 8px;
+        }
+
+        .badge {
+            background: rgba(0, 0, 0, 0.65);
+            backdrop-filter: blur(6px);
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .badge-live {
+            color: #ef4444;
+            border-color: rgba(239, 68, 68, 0.4);
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .badge-live::before {
+            content: '';
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #ef4444;
+            animation: pulse 1.2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.9); opacity: 0.8; }
+            50% { transform: scale(1.4); opacity: 1; }
+            100% { transform: scale(0.9); opacity: 0.8; }
+        }
+
+        .video-controls {
+            display: flex;
+            gap: 12px;
+            margin-top: 14px;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 10px 16px;
+            border-radius: 10px;
+            border: none;
+            font-size: 0.85rem;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #2563eb, #3b82f6);
+            color: #fff;
+            box-shadow: 0 4px 14px rgba(37, 99, 235, 0.3);
+        }
+
+        .btn-primary:hover {
+            opacity: 0.92;
+            transform: translateY(-1px);
+        }
+
+        .btn-danger {
+            background: rgba(239, 68, 68, 0.15);
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        .btn-danger:hover {
+            background: rgba(239, 68, 68, 0.25);
+        }
+
+        /* ── Map Panel ─────────────────────────────────────── */
+        #map {
+            width: 100%;
+            height: 380px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            z-index: 1;
+        }
+
+        .telemetry-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            margin-top: 14px;
+        }
+
+        .telemetry-box {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-card);
+            border-radius: 10px;
+            padding: 10px;
+            text-align: center;
+        }
+
+        .telemetry-label {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .telemetry-value {
+            font-size: 1.1rem;
+            font-weight: 800;
+            font-family: 'JetBrains Mono', monospace;
+            color: #38bdf8;
+        }
+
+        /* ── Alert Strobe ──────────────────────────────────── */
+        .alert-strobe {
+            animation: strobe-border 1.5s infinite;
+        }
+
+        @keyframes strobe-border {
+            0% { border-color: rgba(239, 68, 68, 0.2); }
+            50% { border-color: rgba(239, 68, 68, 1); box-shadow: 0 0 25px rgba(239, 68, 68, 0.4); }
+            100% { border-color: rgba(239, 68, 68, 0.2); }
+        }
+
+        /* ── Evidence Gallery ──────────────────────────────── */
+        .evidence-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+            gap: 14px;
+            max-height: 280px;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+
+        .evidence-card {
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid var(--border-card);
+            border-radius: 10px;
+            overflow: hidden;
+            transition: transform 0.2s;
+            cursor: pointer;
+        }
+
+        .evidence-card:hover {
+            transform: scale(1.03);
+            border-color: var(--accent-cyan);
+        }
+
+        .evidence-thumb {
+            width: 100%;
+            height: 110px;
+            object-fit: cover;
+            background: #111;
+        }
+
+        .evidence-meta {
+            padding: 8px;
+            font-size: 0.72rem;
+        }
+
+        .evidence-type {
+            font-weight: 700;
+            color: #f87171;
+            margin-bottom: 2px;
+        }
+
+        .evidence-time {
+            color: var(--text-muted);
+            font-size: 0.68rem;
+        }
+
+        /* ── Event Log Stream ──────────────────────────────── */
+        .log-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.78rem;
+        }
+
+        .log-table th {
+            text-align: left;
+            padding: 8px 10px;
+            color: var(--text-muted);
+            border-bottom: 1px solid var(--border-card);
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.68rem;
+        }
+
+        .log-table td {
+            padding: 8px 10px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .log-container {
+            max-height: 280px;
+            overflow-y: auto;
+        }
+
+        .badge-violation {
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 700;
+            font-size: 0.7rem;
+            background: rgba(239, 68, 68, 0.2);
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        .badge-gps {
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 0.7rem;
+            background: rgba(59, 130, 246, 0.15);
+            color: #60a5fa;
+        }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 2000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(10px);
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            max-width: 80%;
+            max-height: 80%;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Header -->
+    <header>
+        <div class="brand">
+            <div class="brand-icon">🚗</div>
+            <div class="brand-text">
+                <h1>AppDetect Control Hub</h1>
+                <p>Trung Tâm Giám Sát An Toàn Lái Xe & AI Telemetry</p>
+            </div>
+        </div>
+
+        <div class="status-pills">
+            <div class="pill">
+                <span class="dot dot-amber" id="appDot"></span>
+                <span id="appStatusText">Chờ App kết nối...</span>
+            </div>
+            <div class="pill">
+                <span class="dot dot-amber" id="wsDot"></span>
+                <span id="wsStatusText">Đang kết nối Server...</span>
+            </div>
+            <div class="pill">
+                <span>📹 UDP Port: <strong>9090</strong></span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Grid -->
+    <main>
+        <!-- Column 1: Live Video Camera Feed -->
+        <div class="card" id="videoCard">
+            <div class="card-header">
+                <div class="card-title">
+                    <span>📹 Luồng Video Buồng Lái (UDP Stream)</span>
+                </div>
+                <div class="badge badge-live" id="liveBadge">LIVE 5 FPS</div>
+            </div>
+
+            <div class="video-container">
+                <img id="videoFeed" src="/video_feed" alt="Chờ camera từ điện thoại..." onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'100%\' height=\'100%\' viewBox=\'0 0 400 300\'><rect width=\'400\' height=\'300\' fill=\'%230b0f19\'/><text x=\'50%\' y=\'50%\' dominant-baseline=\'middle\' text-anchor=\'middle\' fill=\'%23475569\' font-family=\'sans-serif\' font-size=\'14\'>Chưa có tín hiệu Video từ App</text></svg>'">
+                
+                <div class="video-overlay-info">
+                    <div class="badge" id="driverBadge">Tài xế: #1</div>
+                    <div class="badge" id="fpsBadge">5.0 FPS</div>
+                </div>
+            </div>
+
+            <div class="video-controls">
+                <button class="btn btn-primary" onclick="sendCommand('START_STREAM')">
+                    <span>▶️ Bật Truyền Video (START_STREAM)</span>
+                </button>
+                <button class="btn btn-danger" onclick="sendCommand('STOP_STREAM')">
+                    <span>⏹ Dừng Truyền Video (STOP_STREAM)</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Column 2: Live GPS Map & Telemetry -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">
+                    <span>📍 Bản Đồ Vị Trí Xe (GPS Telemetry)</span>
+                </div>
+                <span class="badge" id="lastGpsTime">--:--:--</span>
+            </div>
+
+            <div id="map"></div>
+
+            <div class="telemetry-row">
+                <div class="telemetry-box">
+                    <div class="telemetry-label">Tốc Độ</div>
+                    <div class="telemetry-value" id="valSpeed">0.0 <small style="font-size:0.65rem">km/h</small></div>
+                </div>
+                <div class="telemetry-box">
+                    <div class="telemetry-label">Vĩ Độ (Lat)</div>
+                    <div class="telemetry-value" id="valLat">21.0285</div>
+                </div>
+                <div class="telemetry-box">
+                    <div class="telemetry-label">Kinh Độ (Lng)</div>
+                    <div class="telemetry-value" id="valLng">105.854</div>
+                </div>
+                <div class="telemetry-box">
+                    <div class="telemetry-label">Tổng Vi Phạm</div>
+                    <div class="telemetry-value" id="valViolations" style="color:#f87171">0</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Left: Evidence Photos Gallery -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">
+                    <span>📸 Ảnh Bằng Chứng Vi Phạm (POST /violations)</span>
+                </div>
+                <span class="badge" id="evidenceCountBadge">0 ảnh</span>
+            </div>
+
+            <div class="evidence-grid" id="evidenceGrid">
+                <div style="color:var(--text-muted); font-size:0.8rem; padding:10px;">Chưa có ảnh vi phạm nào được ghi nhận.</div>
+            </div>
+        </div>
+
+        <!-- Bottom Right: Live Logs & Alert Stream -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">
+                    <span>⚡ Nhật Ký Hoạt Động Thời Gian Thực</span>
+                </div>
+                <button class="btn" style="padding:4px 8px; font-size:0.7rem; background:rgba(255,255,255,0.05); color:var(--text-muted);" onclick="clearLogs()">Xóa log</button>
+            </div>
+
+            <div class="log-container">
+                <table class="log-table">
+                    <thead>
+                        <tr>
+                            <th>Thời Gian</th>
+                            <th>Sự Kiện</th>
+                            <th>Chi Tiết</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logTbody">
+                        <!-- Dynamic logs -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal Xem Ảnh To -->
+    <div class="modal" id="imageModal" onclick="this.style.display='none'">
+        <img class="modal-content" id="modalImg" src="">
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // ── Khởi tạo Bản Đồ Leaflet ──────────────────────────────────────────
+        const map = L.map('map').setView([21.028511, 105.854167], 15);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap & CARTO'
+        }).addTo(map);
+
+        // Icon ô tô
+        const carIcon = L.divIcon({
+            html: '<div style="font-size: 24px; filter: drop-shadow(0 2px 5px rgba(0,0,0,0.5));">🚗</div>',
+            className: 'car-marker',
+            iconSize: [30, 30],
+            iconAnchor: [15, 15]
+        });
+
+        let marker = L.marker([21.028511, 105.854167], { icon: carIcon }).addTo(map);
+        let pathLine = L.polyline([], { color: '#3b82f6', weight: 4, opacity: 0.8 }).addTo(map);
+
+        // ── WebSocket Client ──────────────────────────────────────────────────
+        let ws;
+        function connectWebSocket() {
+            const loc = window.location;
+            const wsUrl = (loc.protocol === 'https:' ? 'wss://' : 'ws://') + loc.host + '/ws/realtime?type=DASHBOARD';
+            
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                console.log('✅ Dashboard đã kết nối WebSocket Hub');
+                document.getElementById('wsDot').className = 'dot dot-green';
+                document.getElementById('wsStatusText').innerText = 'Server Online (:8080)';
+                addLog('SYSTEM', 'Đã kết nối máy chủ WebSocket');
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    handleServerMessage(msg);
+                } catch (e) {
+                    console.error('Lỗi parse WS message:', e);
+                }
+            };
+
+            ws.onclose = () => {
+                console.warn('🔌 WebSocket đóng. Thử kết nối lại sau 2s...');
+                document.getElementById('wsDot').className = 'dot dot-red';
+                document.getElementById('wsStatusText').innerText = 'Mất kết nối Server';
+                setTimeout(connectWebSocket, 2000);
+            };
+        }
+
+        // ── Xử lý Tin Nhắn từ Server ─────────────────────────────────────────
+        let totalViolations = 0;
+
+        function handleServerMessage(msg) {
+            console.log('📩 Nhận sự kiện:', msg);
+
+            if (msg.type === 'APP_STATUS') {
+                const connected = msg.status === 'CONNECTED';
+                document.getElementById('appDot').className = connected ? 'dot dot-green' : 'dot dot-amber';
+                document.getElementById('appStatusText').innerText = connected ? 'App Online (Đã vào buồng lái)' : 'Chờ App kết nối...';
+                addLog('APP_CONNECT', connected ? 'Ứng dụng Android đã kết nối buồng lái' : 'Ứng dụng Android đã ngắt kết nối');
+            }
+            else if (msg.type === 'GPS_UPDATE') {
+                const d = msg.data;
+                document.getElementById('valSpeed').innerText = d.speed.toFixed(1) + ' km/h';
+                document.getElementById('valLat').innerText = d.latitude.toFixed(4);
+                document.getElementById('valLng').innerText = d.longitude.toFixed(4);
+                document.getElementById('lastGpsTime').innerText = d.timeFormatted;
+
+                const latLng = [d.latitude, d.longitude];
+                marker.setLatLng(latLng);
+                pathLine.addLatLng(latLng);
+                map.panTo(latLng);
+
+                addLog('GPS', `Vị trí: ${d.latitude.toFixed(5)}, ${d.longitude.toFixed(5)} | ${d.speed} km/h`);
+            }
+            else if (msg.type === 'REALTIME_ALERT' || msg.type === 'NEW_VIOLATION') {
+                const d = msg.data || msg;
+                triggerAlertStrobe();
+                totalViolations++;
+                document.getElementById('valViolations').innerText = totalViolations;
+
+                const vType = d.violationType || d.alertType || 'CẢNH BÁO';
+                addLog('VIOLATION', `Phát hiện: ${vType} - ${d.message || ''}`, true);
+
+                if (d.imageUrl) {
+                    addEvidencePhoto(d.imageUrl, vType, d.timeFormatted);
+                }
+            }
+            else if (msg.type === 'INIT_STATE') {
+                if (msg.appConnected) {
+                    document.getElementById('appDot').className = 'dot dot-green';
+                    document.getElementById('appStatusText').innerText = 'App Online (Đã vào buồng lái)';
+                }
+            }
+        }
+
+        // ── Gửi Lệnh WebSocket tới App ────────────────────────────────────────
+        function sendCommand(cmd) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(cmd);
+                addLog('COMMAND', `Đã gửi lệnh điều khiển tới App: ${cmd}`);
+            } else {
+                addLog('ERROR', 'Chưa kết nối WebSocket tới Server. Đang thử kết nối lại...', true);
+                connectWebSocket();
+                alert('Chưa kết nối được WebSocket tới Server! Hãy đảm bảo bạn đã mở start_server.bat');
+            }
+        }
+
+        // ── Hiệu ứng Cảnh Báo Nhấp Nháy ───────────────────────────────────────
+        function triggerAlertStrobe() {
+            const card = document.getElementById('videoCard');
+            card.classList.add('alert-strobe');
+            setTimeout(() => card.classList.remove('alert-strobe'), 4000);
+        }
+
+        // ── Thêm Ảnh Bằng Chứng ──────────────────────────────────────────────
+        function addEvidencePhoto(imgUrl, type, timeStr) {
+            const grid = document.getElementById('evidenceGrid');
+            if (grid.innerHTML.includes('Chưa có ảnh vi phạm')) {
+                grid.innerHTML = '';
+            }
+
+            const card = document.createElement('div');
+            card.className = 'evidence-card';
+            card.innerHTML = `
+                <img class="evidence-thumb" src="${imgUrl}" alt="Evidence" onclick="openImageModal('${imgUrl}')">
+                <div class="evidence-meta">
+                    <div class="evidence-type">🚨 ${type}</div>
+                    <div class="evidence-time">${timeStr || 'Vừa xong'}</div>
+                </div>
+            `;
+            grid.insertBefore(card, grid.firstChild);
+
+            const count = grid.children.length;
+            document.getElementById('evidenceCountBadge').innerText = `${count} ảnh`;
+        }
+
+        function openImageModal(url) {
+            document.getElementById('modalImg').src = url;
+            document.getElementById('imageModal').style.display = 'flex';
+        }
+
+        // ── Thêm Dòng Log ────────────────────────────────────────────────────
+        function addLog(type, content, isAlert = false) {
+            const tbody = document.getElementById('logTbody');
+            const row = document.createElement('tr');
+            const now = new Date().toLocaleTimeString();
+
+            let badgeHtml = `<span class="badge-gps">${type}</span>`;
+            if (isAlert || type === 'VIOLATION') {
+                badgeHtml = `<span class="badge-violation">🚨 ${type}</span>`;
+            }
+
+            row.innerHTML = `
+                <td style="color:var(--text-muted)">${now}</td>
+                <td>${badgeHtml}</td>
+                <td style="${isAlert ? 'color:#fca5a5; font-weight:600' : ''}">${content}</td>
+            `;
+
+            tbody.insertBefore(row, tbody.firstChild);
+            if (tbody.children.length > 50) tbody.removeChild(tbody.lastChild);
+        }
+
+        function clearLogs() {
+            document.getElementById('logTbody').innerHTML = '';
+        }
+
+        // Bắt đầu
+        connectWebSocket();
+    </script>
+</body>
+</html>

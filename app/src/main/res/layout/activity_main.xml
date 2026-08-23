@@ -14,7 +14,7 @@
         android:layout_height="match_parent" />
 
     <!-- Overlay vẽ bounding box -->
-    <com.example.myapplication.BoundingBoxOverlay
+    <com.example.myapplication.ui.BoundingBoxOverlay
         android:id="@+id/bbox_overlay"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />

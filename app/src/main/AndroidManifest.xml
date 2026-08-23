@@ -30,14 +30,14 @@
 
         <!-- Màn hình xác thực tài xế - TẮT TẠM ĐỂ TEST -->
         <activity
-            android:name=".DriverVerifyActivity"
+            android:name=".ui.DriverVerifyActivity"
             android:exported="false"
             android:screenOrientation="portrait">
         </activity>
 
-        <!-- Màn hình chính - BẬT LAUNCHER ĐỂ TEST TRỰC TIẾP -->
+        <!-- Màn hình giám sát cabin - BẬT LAUNCHER ĐỂ TEST TRỰC TIẾP -->
         <activity
-            android:name=".MainActivity"
+            android:name=".ui.DriverMonitorActivity"
             android:exported="true"
             android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize">
@@ -46,6 +46,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Dịch vụ chạy nền thu thập GPS -->
+        <service
+            android:name=".service.LocationTrackingService"
+            android:foregroundServiceType="location"
+            android:exported="false" />
     </application>
 
 </manifest>

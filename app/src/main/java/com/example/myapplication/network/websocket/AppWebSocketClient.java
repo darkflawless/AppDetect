@@ -1,8 +1,11 @@
-package com.example.myapplication;
+package com.example.myapplication.network.websocket;
 
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+
+import com.example.myapplication.data.model.RealtimeAlertDto;
+import com.google.gson.Gson;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -13,15 +16,8 @@ import okhttp3.WebSocketListener;
 import java.util.concurrent.TimeUnit;
 
 /**
- * App Android kết nối tới Backend WebSocket với vai trò APP client.
- *
- * URL kết nối: ws://<IP_BACKEND>:8080/ws/realtime?type=APP&driverId=<driverId>
- *
- * Nhận lệnh từ Backend:
- * {"type":"START_STREAM"} → gọi listener.onStartStream()
- * {"type":"STOP_STREAM"} → gọi listener.onStopStream()
- *
- * Tự động reconnect nếu mất kết nối.
+ * AppWebSocketClient - Chuyên trách kết nối WebSocket 2 chiều:
+ * Nhận lệnh START_STREAM / STOP_STREAM từ Server và chuẩn bị bắn sự kiện REALTIME_ALERT.
  */
 public class AppWebSocketClient {
 
@@ -120,6 +116,28 @@ public class AppWebSocketClient {
         }
         if (httpClient != null) {
             httpClient.dispatcher().executorService().shutdown();
+        }
+    }
+
+    /**
+     * Bắn sự kiện cảnh báo vi phạm tức thì lên Server qua WebSocket.
+     *
+     * @param driverId  ID tài xế
+     * @param alertType Loại vi phạm (DROWSY, NO_SEATBELT, DISTRACTED)
+     * @param message   Nội dung cảnh báo chi tiết
+     */
+    public void sendRealtimeAlert(long driverId, String alertType, String message) {
+        if (webSocket != null) {
+            RealtimeAlertDto alertDto = new RealtimeAlertDto(driverId, alertType, message);
+            String json = new Gson().toJson(alertDto);
+            webSocket.send(json);
+            Log.d(TAG, "⚡ [WS -> Server] Đã bắn cảnh báo: " + alertType);
+        }
+    }
+
+    public void sendText(String text) {
+        if (webSocket != null) {
+            webSocket.send(text);
         }
     }
 }

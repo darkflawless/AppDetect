@@ -1,9 +1,11 @@
-package com.example.myapplication;
+package com.example.myapplication.ai;
 
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.RectF;
 import android.util.Log;
+
+import com.example.myapplication.utils.ImageUtils;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -25,17 +27,17 @@ public class DetectionPipeline {
 
     // Executors
     private final ExecutorService cameraExecutor;
-    private final ExecutorService yoloExecutor;
+    private final ExecutorService seatbeltExecutor;
     private final ExecutorService drowsinessExecutor;
     private final ExecutorService personExecutor;
 
     // Pending futures
-    private Future<List<SeatBeltDetector.Detection>> pendingYoloFuture = null;
+    private Future<List<SeatBeltDetector.Detection>> pendingSeatbeltFuture = null;
     private Future<DrowsinessDetector.DrowsinessResult> pendingDrowsinessFuture = null;
     private Future<List<RectF>> pendingPersonFuture = null;
 
     // Last results
-    private List<SeatBeltDetector.Detection> lastYoloDetections = new ArrayList<>();
+    private List<SeatBeltDetector.Detection> lastSeatbeltDetections = new ArrayList<>();
     private DrowsinessDetector.DrowsinessResult lastDrowsinessResult = null;
     private List<RectF> lastPersonBboxes = new ArrayList<>();
 
@@ -43,18 +45,19 @@ public class DetectionPipeline {
 
     public interface PipelineCallback {
         void onPipelineResult(List<SeatBeltDetector.Detection> detections,
-                              DrowsinessDetector.DrowsinessResult drowsinessResult,
-                              float fps, int imgW, int imgH);
+                DrowsinessDetector.DrowsinessResult drowsinessResult,
+                float fps, int imgW, int imgH);
     }
 
     public interface InitCallback {
         void onSuccess();
+
         void onError(Exception e);
     }
 
     public DetectionPipeline() {
         cameraExecutor = Executors.newSingleThreadExecutor();
-        yoloExecutor = Executors.newSingleThreadExecutor();
+        seatbeltExecutor = Executors.newSingleThreadExecutor();
         drowsinessExecutor = Executors.newSingleThreadExecutor();
         personExecutor = Executors.newSingleThreadExecutor();
     }
@@ -70,16 +73,19 @@ public class DetectionPipeline {
                 seatbeltDetector = new SeatBeltDetector(context, labels);
                 personDetector = new PersonDetector(context);
                 Log.d(TAG, "All models loaded successfully");
-                if (callback != null) callback.onSuccess();
+                if (callback != null)
+                    callback.onSuccess();
             } catch (Exception e) {
                 Log.e(TAG, "Error loading models", e);
-                if (callback != null) callback.onError(e);
+                if (callback != null)
+                    callback.onError(e);
             }
         });
     }
 
     public void processFrame(Bitmap bitmap, long timestampMs, PipelineCallback callback) {
-        if (drowsinessDetector == null || bitmap == null) return;
+        if (drowsinessDetector == null || bitmap == null)
+            return;
 
         // 1. Thu kết quả person detection
         if (pendingPersonFuture != null && pendingPersonFuture.isDone()) {
@@ -102,13 +108,13 @@ public class DetectionPipeline {
         }
 
         // 3. Thu kết quả seatbelt
-        if (pendingYoloFuture != null && pendingYoloFuture.isDone()) {
+        if (pendingSeatbeltFuture != null && pendingSeatbeltFuture.isDone()) {
             try {
-                lastYoloDetections = new ArrayList<>(pendingYoloFuture.get());
+                lastSeatbeltDetections = new ArrayList<>(pendingSeatbeltFuture.get());
             } catch (Exception e) {
                 Log.w(TAG, "YOLO result error: " + e.getMessage());
             }
-            pendingYoloFuture = null;
+            pendingSeatbeltFuture = null;
         }
 
         // ── Submit Person Detection (Step 1) ──────────────────────────────────
@@ -122,18 +128,19 @@ public class DetectionPipeline {
         }
 
         // ── Submit Seatbelt Detection (Step 2): Crop từng người ───────────────
-        if (seatbeltDetector != null && pendingYoloFuture == null && !lastPersonBboxes.isEmpty()) {
+        if (seatbeltDetector != null && pendingSeatbeltFuture == null && !lastPersonBboxes.isEmpty()) {
             final Bitmap fullBitmap = bitmap.copy(bitmap.getConfig(), false);
             final List<RectF> persons = new ArrayList<>(lastPersonBboxes);
 
-            pendingYoloFuture = yoloExecutor.submit(() -> {
+            pendingSeatbeltFuture = seatbeltExecutor.submit(() -> {
                 List<SeatBeltDetector.Detection> allSb = new ArrayList<>();
 
                 int pIdx = 1;
                 for (RectF pBbox : persons) {
                     // Crop người từ ảnh gốc sắc nét với 8% margin
                     ImageUtils.CropResult crop = ImageUtils.cropPersonWithMargin(fullBitmap, pBbox, 0.08f);
-                    if (crop == null) continue;
+                    if (crop == null)
+                        continue;
 
                     // Detect seatbelt trên crop
                     List<SeatBeltDetector.Detection> sbOnCrop = seatbeltDetector.detect(crop.cropBitmap);
@@ -158,12 +165,12 @@ public class DetectionPipeline {
                 fullBitmap.recycle();
                 return allSb;
             });
-        } else if (seatbeltDetector != null && pendingYoloFuture == null && lastPersonBboxes.isEmpty()) {
+        } else if (seatbeltDetector != null && pendingSeatbeltFuture == null && lastPersonBboxes.isEmpty()) {
             // Fallback: Chạy full frame nếu không detect được người
-            final Bitmap yoloBitmap = bitmap.copy(bitmap.getConfig(), false);
-            pendingYoloFuture = yoloExecutor.submit(() -> {
-                List<SeatBeltDetector.Detection> result = seatbeltDetector.detect(yoloBitmap);
-                yoloBitmap.recycle();
+            final Bitmap seatbeltBitmap = bitmap.copy(bitmap.getConfig(), false);
+            pendingSeatbeltFuture = seatbeltExecutor.submit(() -> {
+                List<SeatBeltDetector.Detection> result = seatbeltDetector.detect(seatbeltBitmap);
+                seatbeltBitmap.recycle();
                 return result;
             });
         }
@@ -184,16 +191,19 @@ public class DetectionPipeline {
                 ? lastDrowsinessResult
                 : new DrowsinessDetector.DrowsinessResult();
 
-        List<SeatBeltDetector.Detection> seatbeltDetections = new ArrayList<>(lastYoloDetections);
+        List<SeatBeltDetector.Detection> seatbeltDetections = new ArrayList<>(lastSeatbeltDetections);
 
         if (drowsinessResult.faceDetected && drowsinessResult.faceBbox != null) {
             String faceLabel = "Face";
-            if (drowsinessResult.isDrowsy) faceLabel = "Drowsy";
-            else if (drowsinessResult.isDistracted) faceLabel = "Distracted";
-            else if (drowsinessResult.isYawning) faceLabel = "Yawning";
+            if (drowsinessResult.isDrowsy)
+                faceLabel = "Drowsy";
+            else if (drowsinessResult.isDistracted)
+                faceLabel = "Distracted";
+            else if (drowsinessResult.isYawning)
+                faceLabel = "Yawning";
 
             seatbeltDetections.add(new SeatBeltDetector.Detection(
-                    drowsinessResult.faceBbox, -1, 1.0f, faceLabel));
+                drowsinessResult.faceBbox, -1, 1.0f, faceLabel));
         }
 
         long now = System.currentTimeMillis();
@@ -207,13 +217,20 @@ public class DetectionPipeline {
     }
 
     public void close() {
-        if (cameraExecutor != null) cameraExecutor.shutdown();
-        if (yoloExecutor != null) yoloExecutor.shutdown();
-        if (drowsinessExecutor != null) drowsinessExecutor.shutdown();
-        if (personExecutor != null) personExecutor.shutdown();
+        if (cameraExecutor != null)
+            cameraExecutor.shutdown();
+        if (seatbeltExecutor != null)
+            seatbeltExecutor.shutdown();
+        if (drowsinessExecutor != null)
+            drowsinessExecutor.shutdown();
+        if (personExecutor != null)
+            personExecutor.shutdown();
 
-        if (seatbeltDetector != null) seatbeltDetector.close();
-        if (drowsinessDetector != null) drowsinessDetector.close();
-        if (personDetector != null) personDetector.close();
+        if (seatbeltDetector != null)
+            seatbeltDetector.close();
+        if (drowsinessDetector != null)
+            drowsinessDetector.close();
+        if (personDetector != null)
+            personDetector.close();
     }
 }

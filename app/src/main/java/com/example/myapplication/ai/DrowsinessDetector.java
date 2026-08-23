@@ -1,4 +1,4 @@
-package com.example.myapplication;
+package com.example.myapplication.ai;
 
 import android.content.Context;
 import android.graphics.Bitmap;
@@ -40,8 +40,7 @@ public class DrowsinessDetector {
     // Bước 1: TFLite YOLO face detector (model tự train)
     private final TFLiteFaceDetector tfliteDetector;
 
-    // Bước 2: ML Kit chỉ dùng để lấy contour landmark (không dùng để detect mặt
-    // nữa)
+    // Bước 2: ML Kit chỉ dùng để lấy contour landmark (không dùng để detect mặt nữa)
     private final FaceDetector mlkitDetector;
 
     private long firstClosedEyeTime = 0;

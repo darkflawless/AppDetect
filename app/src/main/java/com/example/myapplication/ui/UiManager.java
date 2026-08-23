@@ -1,4 +1,4 @@
-package com.example.myapplication;
+package com.example.myapplication.ui;
 
 import android.app.Activity;
 import android.graphics.Color;
@@ -9,6 +9,10 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.camera.view.PreviewView;
+
+import com.example.myapplication.R;
+import com.example.myapplication.ai.DrowsinessDetector;
+import com.example.myapplication.ai.SeatBeltDetector;
 
 import java.util.List;
 

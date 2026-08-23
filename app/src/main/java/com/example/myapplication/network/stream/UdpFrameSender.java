@@ -1,4 +1,4 @@
-package com.example.myapplication;
+package com.example.myapplication.network.stream;
 
 import android.graphics.Bitmap;
 import android.util.Log;
@@ -13,23 +13,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Gửi frame ảnh từ camera App lên Backend qua giao thức UDP.
+ * UdpFrameSender - Chuyên trách mở UDP Socket (port 9090) nén JPEG 60%
+ * và stream trực tiếp các khung hình video lên Server.
  *
  * Định dạng packet gửi đi:
  * ┌──────────────────────────┬─────────────────────────┐
- * │ 8 byte (driverId - long) │ N byte (JPEG bytes) │
+ * │ 8 byte (driverId - long) │ N byte (JPEG bytes)     │
  * └──────────────────────────┴─────────────────────────┘
- *
- * Cách dùng trong MainActivity:
- * // Khởi tạo 1 lần
- * udpSender = new UdpFrameSender("192.168.1.100", 9090, driverId);
- *
- * // Trong analyzeFrame() sau khi có bitmap:
- * udpSender.sendFrame(bitmap);
- *
- * // Khi nhận lệnh START_STREAM / STOP_STREAM:
- * udpSender.startStreaming();
- * udpSender.stopStreaming();
  */
 public class UdpFrameSender {
 
@@ -86,10 +76,9 @@ public class UdpFrameSender {
 
     /**
      * Gửi 1 frame ảnh lên Backend.
-     * Gọi hàm này mỗi frame trong analyzeFrame() của MainActivity.
-     * Hàm tự bỏ qua nếu chưa đến lượt gửi (throttle 5fps) hoặc đang dừng.
+     * Tự bỏ qua nếu chưa đến lượt gửi (throttle 5fps) hoặc đang dừng.
      *
-     * @param bitmap Frame ảnh hiện tại (đã được resize về 480px)
+     * @param bitmap Frame ảnh hiện tại
      */
     public void sendFrame(Bitmap bitmap) {
         // Không stream → bỏ qua
