@@ -203,7 +203,7 @@ public class DetectionPipeline {
                 faceLabel = "Yawning";
 
             seatbeltDetections.add(new SeatBeltDetector.Detection(
-                drowsinessResult.faceBbox, -1, 1.0f, faceLabel));
+                    drowsinessResult.faceBbox, -1, 1.0f, faceLabel));
         }
 
         long now = System.currentTimeMillis();

@@ -39,7 +39,7 @@ public class TFLiteFaceDetector {
     public static final int INPUT_SIZE = 640;
 
     // Ngưỡng confidence để giữ detection
-    private static final float CONFIDENCE_THRESHOLD = 0.40f;
+    private static final float CONFIDENCE_THRESHOLD = 0.25f;
 
     // Ngưỡng IoU cho NMS
     private static final float IOU_THRESHOLD = 0.45f;

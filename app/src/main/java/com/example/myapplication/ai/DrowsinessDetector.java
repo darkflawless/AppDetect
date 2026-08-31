@@ -40,7 +40,8 @@ public class DrowsinessDetector {
     // Bước 1: TFLite YOLO face detector (model tự train)
     private final TFLiteFaceDetector tfliteDetector;
 
-    // Bước 2: ML Kit chỉ dùng để lấy contour landmark (không dùng để detect mặt nữa)
+    // Bước 2: ML Kit chỉ dùng để lấy contour landmark (không dùng để detect mặt
+    // nữa)
     private final FaceDetector mlkitDetector;
 
     private long firstClosedEyeTime = 0;
@@ -50,6 +51,18 @@ public class DrowsinessDetector {
     private long lastDistractedTime = 0;
 
     private long firstFaceMissingTime = 0;
+
+    // Debounce cho timer EAR — chỉ reset khi N frame liên tiếp EAR >= threshold
+    // Tránh timer bị reset do 1 frame nhiễu/blink ngắn
+    private static final int EAR_OPEN_RESET_FRAMES = 3;
+    private int earOpenFrameCount = 0;
+
+    // EAR cuối cùng khi còn nhìn thấy mặt — dùng để phân biệt 2 trường hợp mất mặt:
+    // • EAR thấp trước khi mất mặt → đang nhắm mắt (ngủ gật) → tiếp tục đếm drowsy
+    // timer
+    // • EAR bình thường trước khi mất mặt → quay đầu / rời ghế → đếm face missing
+    // timer
+    private float lastKnownEar = 0.3f;
 
     // -------------------------------------------------------------------------
     // Kết quả trả về cho MainActivity
@@ -100,24 +113,50 @@ public class DrowsinessDetector {
             RectF faceBboxInCrop = tfliteDetector.detectBestFace(driverRegion);
 
             if (faceBboxInCrop == null) {
-                // Không tìm thấy mặt ở vị trí ghế lái -> Tăng bộ đếm Face Missing
-                if (firstFaceMissingTime == 0) {
-                    firstFaceMissingTime = System.currentTimeMillis();
-                }
-                long missingDuration = System.currentTimeMillis() - firstFaceMissingTime;
+                // ── Phân biệt 2 nguyên nhân mất mặt ─────────────────────────────
+                // lastKnownEar < EAR_THRESHOLD * 1.5f → mắt đang nhắm dần trước khi TFLite miss
+                // → Khả năng cao là đang NGỦ GẬT, KHÔNG phải quay đầu
+                boolean likelySleeping = (lastKnownEar < EAR_THRESHOLD * 1.5f);
 
-                if (missingDuration >= FACE_MISSING_TIME_THRESHOLD_MS) {
-                    result.isFaceMissing = true;
-                    // Báo động xong thì reset tracker để frame sau tự quét lại từ đầu
-                    tfliteDetector.resetTracker();
-                }
+                if (likelySleeping) {
+                    // ── Trường hợp 1: Mất mặt do ĐANG NGỦ (mắt nhắm) ────────────
+                    // Tiếp tục đếm timer ngủ gật, KHÔNG kích hoạt face missing
+                    firstFaceMissingTime = 0; // reset face missing timer
+                    firstDistractedTime = 0;
 
-                // Không tìm thấy mặt → reset timer buồn ngủ/mất tập trung, giữ cảnh báo
-                // persistence nếu còn hiệu lực
-                firstClosedEyeTime = 0;
-                firstDistractedTime = 0;
-                result.isDrowsy = (System.currentTimeMillis() - lastDrowsyTime < ALERT_PERSISTENCE_MS);
-                result.isDistracted = (System.currentTimeMillis() - lastDistractedTime < ALERT_PERSISTENCE_MS);
+                    if (firstClosedEyeTime == 0) {
+                        firstClosedEyeTime = System.currentTimeMillis();
+                    }
+                    long currentClosedDuration = System.currentTimeMillis() - firstClosedEyeTime;
+                    if (currentClosedDuration >= CLOSED_EYE_TIME_THRESHOLD_MS) {
+                        lastDrowsyTime = System.currentTimeMillis();
+                    }
+                    result.closedEyeDurationMs = currentClosedDuration;
+                    result.isDrowsy = (currentClosedDuration >= CLOSED_EYE_TIME_THRESHOLD_MS)
+                            || (System.currentTimeMillis() - lastDrowsyTime < ALERT_PERSISTENCE_MS);
+                    result.isDistracted = false;
+                    Log.d(TAG, "Mất mặt do ngủ gật (EAR cuối=" + lastKnownEar + "), drowsyTimer="
+                            + currentClosedDuration + "ms");
+                } else {
+                    // ── Trường hợp 2: Mất mặt do QUAY ĐẦU / RỜI GHẾ ────────────
+                    // Reset timer ngủ gật, đếm face missing timer
+                    firstClosedEyeTime = 0;
+                    earOpenFrameCount = 0;
+                    firstDistractedTime = 0;
+
+                    if (firstFaceMissingTime == 0) {
+                        firstFaceMissingTime = System.currentTimeMillis();
+                    }
+                    long missingDuration = System.currentTimeMillis() - firstFaceMissingTime;
+                    if (missingDuration >= FACE_MISSING_TIME_THRESHOLD_MS) {
+                        result.isFaceMissing = true;
+                        tfliteDetector.resetTracker();
+                    }
+                    result.isDrowsy = (System.currentTimeMillis() - lastDrowsyTime < ALERT_PERSISTENCE_MS);
+                    result.isDistracted = (System.currentTimeMillis() - lastDistractedTime < ALERT_PERSISTENCE_MS);
+                    Log.d(TAG, "Mất mặt do quay đầu (EAR cuối=" + lastKnownEar + "), missingTimer=" + missingDuration
+                            + "ms");
+                }
                 return result;
             } else {
                 // Tìm thấy mặt -> reset timer Face Missing
@@ -168,19 +207,29 @@ public class DrowsinessDetector {
                 result.headEulerY = face.getHeadEulerAngleY();
 
             } else {
-                // ML Kit không thấy contour trong crop → dùng EAR mặc định (mắt mở)
-                Log.d(TAG, "ML Kit: không tìm thấy contour trong crop");
-                result.ear = 0.3f;
+                // FIX: ML Kit không thấy contour → coi như mắt đang nhắm (conservative)
+                // Trước đây là 0.3f (mắt mở) → SAI: lúc mắt nhắm chặt nhất thì ML Kit hay miss
+                // nhất
+                Log.d(TAG, "ML Kit: không tìm thấy contour trong crop → coi như mắt nhắm");
+                result.ear = 0.0f;
                 result.headEulerY = 0f;
             }
 
             // ── Logic cảnh báo ngủ gật ────────────────────────────────────────
+            // FIX: Dùng debounce — chỉ reset timer khi có EAR_OPEN_RESET_FRAMES frame
+            // liên tiếp vượt ngưỡng, tránh nhiễu 1 frame reset toàn bộ bộ đếm 3 giây
             if (result.ear < EAR_THRESHOLD) {
+                earOpenFrameCount = 0; // mắt đang nhắm → reset bộ đếm "mắt mở"
                 if (firstClosedEyeTime == 0) {
                     firstClosedEyeTime = System.currentTimeMillis();
                 }
             } else {
-                firstClosedEyeTime = 0;
+                earOpenFrameCount++;
+                // Chỉ reset timer sau N frame liên tiếp mắt mở thực sự
+                if (earOpenFrameCount >= EAR_OPEN_RESET_FRAMES) {
+                    firstClosedEyeTime = 0;
+                    earOpenFrameCount = 0;
+                }
             }
 
             long currentClosedDuration = (firstClosedEyeTime > 0)
@@ -216,6 +265,9 @@ public class DrowsinessDetector {
             result.distractedDurationMs = currentDistractedDuration;
             result.isDistracted = (currentDistractedDuration >= DISTRACTION_TIME_THRESHOLD_MS)
                     || (System.currentTimeMillis() - lastDistractedTime < ALERT_PERSISTENCE_MS);
+
+            // Lưu EAR hiện tại để frame sau dùng phân biệt nguyên nhân mất mặt
+            lastKnownEar = result.ear;
 
         } catch (ExecutionException | InterruptedException e) {
             // Nếu lỗi inference, trả về result mặc định (không crash app)
@@ -288,14 +340,14 @@ public class DrowsinessDetector {
     // -------------------------------------------------------------------------
     private float calcEar(List<PointF> pts) {
         if (pts == null || pts.size() < 16)
-            return 0.3f; // mặt định: mắt mở
+            return 0.0f; // FIX: thiếu điểm contour → coi mắt nhắm (trước đây là 0.3f sai)
 
         float A = dist(pts.get(2), pts.get(14));
         float B = dist(pts.get(4), pts.get(12));
         float C = dist(pts.get(0), pts.get(8));
 
         if (C < 1f)
-            return 0.3f;
+            return 0.0f; // FIX: chiều rộng mắt = 0 → không đo được → coi mắt nhắm
         return (A + B) / (2.0f * C);
     }
 
