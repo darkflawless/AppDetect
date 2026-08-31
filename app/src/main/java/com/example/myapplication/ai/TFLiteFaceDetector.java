@@ -140,26 +140,13 @@ public class TFLiteFaceDetector {
 
     public RectF detectBestFace(Bitmap bitmap) {
         List<FaceBox> faces = detect(bitmap);
-        if (faces.isEmpty())
+        if (faces.isEmpty()) {
+            lastDriverBbox = null;
             return null;
+        }
 
-        if (lastDriverBbox == null) {
-            // BƯỚC 1 (Init): Tìm khuôn mặt có diện tích Bounding Box lớn nhất (Tài xế)
-            RectF largestFace = faces.get(0).bbox;
-            float maxArea = largestFace.width() * largestFace.height();
-
-            for (int i = 1; i < faces.size(); i++) {
-                RectF currentFace = faces.get(i).bbox;
-                float currentArea = currentFace.width() * currentFace.height();
-                if (currentArea > maxArea) {
-                    maxArea = currentArea;
-                    largestFace = currentFace;
-                }
-            }
-            lastDriverBbox = largestFace;
-            return largestFace;
-        } else {
-            // BƯỚC 2 (Track): Tìm khuôn mặt trùng khớp với vị trí cũ nhất
+        // 1. Nếu có vị trí khuôn mặt cũ, ưu tiên track theo IoU
+        if (lastDriverBbox != null) {
             RectF bestTrackedFace = null;
             float bestIoU = -1f;
 
@@ -171,16 +158,28 @@ public class TFLiteFaceDetector {
                 }
             }
 
-            // Nếu độ trùng khớp đủ lớn -> Cập nhật vị trí
+            // Nếu độ trùng khớp đủ lớn -> Cập nhật vị trí tracking
             if (bestIoU > IOU_TRACKING_THRESHOLD && bestTrackedFace != null) {
                 lastDriverBbox = bestTrackedFace;
                 return bestTrackedFace;
-            } else {
-                // Không tìm thấy ai ở vị trí ghế lái (Tài xế đã gục hoặc rời đi)
-                // Lưu ý: KHÔNG resetTracker ở đây, để DrowsinessDetector quyết định
-                return null;
             }
         }
+
+        // 2. Nếu chưa có vị trí cũ HOẶC tài xế quay lại/đổi góc (IoU thấp):
+        // Chọn khuôn mặt to nhất trong vùng ghế lái (luôn là tài xế)
+        RectF largestFace = faces.get(0).bbox;
+        float maxArea = largestFace.width() * largestFace.height();
+
+        for (int i = 1; i < faces.size(); i++) {
+            RectF currentFace = faces.get(i).bbox;
+            float currentArea = currentFace.width() * currentFace.height();
+            if (currentArea > maxArea) {
+                maxArea = currentArea;
+                largestFace = currentFace;
+            }
+        }
+        lastDriverBbox = largestFace;
+        return largestFace;
     }
 
     // -------------------------------------------------------------------------
