@@ -50,7 +50,7 @@ public class DriverVerifyActivity extends AppCompatActivity {
     private static final int REQUEST_CAMERA = 100;
     private static final long VERIFY_INTERVAL_MS = 2000L; 
 
-    private static final String BASE_URL = "http://10.32.238.110:8000";
+    public static final String BASE_URL = "http://192.168.1.14:8000";
 
     private PreviewView previewView;
     private TextView tvStatus;
@@ -231,7 +231,8 @@ public class DriverVerifyActivity extends AppCompatActivity {
 
                 Toast.makeText(this, "Xác thực thành công!", Toast.LENGTH_SHORT).show();
                 
-                Intent intent = new Intent(DriverVerifyActivity.this, MainActivity.class);
+                Intent intent = new Intent(DriverVerifyActivity.this, AlcoholMeasureActivity.class);
+                intent.putExtra("DRIVER_ID", response.driverId);
                 startActivity(intent);
                 finish(); 
             } else {
