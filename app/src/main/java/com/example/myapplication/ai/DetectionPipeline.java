@@ -14,7 +14,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 /**
- * DetectionPipeline - Quản lý bộ máy AI 3 models và luồng xử lý bất đồng bộ.
+ * DetectionPipeline - Quản lý các mô hình AI và luồng xử lý bất đồng bộ.
+ * (Hiện tại đã tạm comment luồng Seatbelt & Person để giải phóng 100% CPU/RAM
+ *  cho mô hình nhận diện Buồn ngủ Drowsiness đạt FPS cao nhất).
  */
 public class DetectionPipeline {
 
@@ -69,10 +71,14 @@ public class DetectionPipeline {
     public void loadModelsAsync(Context context, String[] labels, InitCallback callback) {
         cameraExecutor.execute(() -> {
             try {
+                // 1. Chỉ nạp mô hình nhận diện buồn ngủ (LSTM + Face Detector)
                 drowsinessDetector = new DrowsinessDetector(context);
-                seatbeltDetector = new SeatBeltDetector(context, labels);
-                personDetector = new PersonDetector(context);
-                Log.d(TAG, "All models loaded successfully");
+
+                // TẠM COMMENT SEATBELT & PERSON ĐỂ TIẾT KIỆM TỐI ĐA BỘ NHỚ VÀ TĂNG FPS
+                // seatbeltDetector = new SeatBeltDetector(context, labels);
+                // personDetector = new PersonDetector(context);
+
+                Log.d(TAG, "Drowsiness model loaded successfully (Seatbelt & Person temporarily disabled)");
                 if (callback != null)
                     callback.onSuccess();
             } catch (Exception e) {
@@ -87,17 +93,7 @@ public class DetectionPipeline {
         if (drowsinessDetector == null || bitmap == null)
             return;
 
-        // 1. Thu kết quả person detection
-        if (pendingPersonFuture != null && pendingPersonFuture.isDone()) {
-            try {
-                lastPersonBboxes = new ArrayList<>(pendingPersonFuture.get());
-            } catch (Exception e) {
-                Log.w(TAG, "Person result error: " + e.getMessage());
-            }
-            pendingPersonFuture = null;
-        }
-
-        // 2. Thu kết quả drowsiness
+        // 1. Thu kết quả drowsiness
         if (pendingDrowsinessFuture != null && pendingDrowsinessFuture.isDone()) {
             try {
                 lastDrowsinessResult = pendingDrowsinessFuture.get();
@@ -107,7 +103,33 @@ public class DetectionPipeline {
             pendingDrowsinessFuture = null;
         }
 
-        // 3. Thu kết quả seatbelt
+        /*
+        // ---------------------------------------------------------------------
+        // TẠM COMMENT LUỒNG PERSON DETECTION ĐỂ TẬP TRUNG TỐI ĐA CHO BUỒN NGỦ
+        // ---------------------------------------------------------------------
+        if (pendingPersonFuture != null && pendingPersonFuture.isDone()) {
+            try {
+                lastPersonBboxes = new ArrayList<>(pendingPersonFuture.get());
+            } catch (Exception e) {
+                Log.w(TAG, "Person result error: " + e.getMessage());
+            }
+            pendingPersonFuture = null;
+        }
+
+        if (personDetector != null && pendingPersonFuture == null) {
+            final Bitmap personBitmap = bitmap.copy(bitmap.getConfig(), false);
+            pendingPersonFuture = personExecutor.submit(() -> {
+                List<RectF> persons = personDetector.detectPersons(personBitmap);
+                personBitmap.recycle();
+                return persons;
+            });
+        }
+        */
+
+        /*
+        // ---------------------------------------------------------------------
+        // TẠM COMMENT LUỒNG SEATBELT DETECTION ĐỂ GIẢM TẢI CPU/RAM
+        // ---------------------------------------------------------------------
         if (pendingSeatbeltFuture != null && pendingSeatbeltFuture.isDone()) {
             try {
                 lastSeatbeltDetections = new ArrayList<>(pendingSeatbeltFuture.get());
@@ -117,36 +139,20 @@ public class DetectionPipeline {
             pendingSeatbeltFuture = null;
         }
 
-        // ── Submit Person Detection (Step 1) ──────────────────────────────────
-        if (personDetector != null && pendingPersonFuture == null) {
-            final Bitmap personBitmap = bitmap.copy(bitmap.getConfig(), false);
-            pendingPersonFuture = personExecutor.submit(() -> {
-                List<RectF> persons = personDetector.detectPersons(personBitmap);
-                personBitmap.recycle();
-                return persons;
-            });
-        }
-
-        // ── Submit Seatbelt Detection (Step 2): Crop từng người ───────────────
         if (seatbeltDetector != null && pendingSeatbeltFuture == null && !lastPersonBboxes.isEmpty()) {
             final Bitmap fullBitmap = bitmap.copy(bitmap.getConfig(), false);
             final List<RectF> persons = new ArrayList<>(lastPersonBboxes);
 
             pendingSeatbeltFuture = seatbeltExecutor.submit(() -> {
                 List<SeatBeltDetector.Detection> allSb = new ArrayList<>();
-
                 int pIdx = 1;
                 for (RectF pBbox : persons) {
-                    // Crop người từ ảnh gốc sắc nét với 8% margin
                     ImageUtils.CropResult crop = ImageUtils.cropPersonWithMargin(fullBitmap, pBbox, 0.08f);
-                    if (crop == null)
-                        continue;
+                    if (crop == null) continue;
 
-                    // Detect seatbelt trên crop
                     List<SeatBeltDetector.Detection> sbOnCrop = seatbeltDetector.detect(crop.cropBitmap);
                     crop.cropBitmap.recycle();
 
-                    // Map tọa độ bbox từ crop → full frame (normalized)
                     for (SeatBeltDetector.Detection d : sbOnCrop) {
                         float gL = crop.cropL + d.bbox.left * crop.getNormW();
                         float gT = crop.cropT + d.bbox.top * crop.getNormH();
@@ -156,26 +162,18 @@ public class DetectionPipeline {
                                 new RectF(gL, gT, gR, gB),
                                 d.classId, d.confidence, d.label));
                     }
-
-                    // Thêm bbox người vào overlay (P1, P2, P3...)
                     allSb.add(new SeatBeltDetector.Detection(new RectF(pBbox), -2, 1.0f, "P" + pIdx));
                     pIdx++;
                 }
-
                 fullBitmap.recycle();
                 return allSb;
             });
-        } else if (seatbeltDetector != null && pendingSeatbeltFuture == null && lastPersonBboxes.isEmpty()) {
-            // Fallback: Chạy full frame nếu không detect được người
-            final Bitmap seatbeltBitmap = bitmap.copy(bitmap.getConfig(), false);
-            pendingSeatbeltFuture = seatbeltExecutor.submit(() -> {
-                List<SeatBeltDetector.Detection> result = seatbeltDetector.detect(seatbeltBitmap);
-                seatbeltBitmap.recycle();
-                return result;
-            });
         }
+        */
 
-        // ── Submit Drowsiness ─────────────────────────────────────────────────
+        // ---------------------------------------------------------------------
+        // LUỒNG DUY NHẤT ĐƯỢC CHẠY: NHẬN DIỆN BUỒN NGỦ (DROWSINESS)
+        // ---------------------------------------------------------------------
         if (pendingDrowsinessFuture == null) {
             final Bitmap drowsinessBitmap = bitmap.copy(bitmap.getConfig(), false);
             final long ts = timestampMs;
@@ -186,12 +184,12 @@ public class DetectionPipeline {
             });
         }
 
-        // ── Tổng hợp kết quả mới nhất ─────────────────────────────────────────
+        // Tổng hợp kết quả
         DrowsinessDetector.DrowsinessResult drowsinessResult = (lastDrowsinessResult != null)
                 ? lastDrowsinessResult
                 : new DrowsinessDetector.DrowsinessResult();
 
-        List<SeatBeltDetector.Detection> seatbeltDetections = new ArrayList<>(lastSeatbeltDetections);
+        List<SeatBeltDetector.Detection> detections = new ArrayList<>();
 
         if (drowsinessResult.faceDetected && drowsinessResult.faceBbox != null) {
             String faceLabel = "Face";
@@ -202,7 +200,7 @@ public class DetectionPipeline {
             else if (drowsinessResult.isYawning)
                 faceLabel = "Yawning";
 
-            seatbeltDetections.add(new SeatBeltDetector.Detection(
+            detections.add(new SeatBeltDetector.Detection(
                     drowsinessResult.faceBbox, -1, 1.0f, faceLabel));
         }
 
@@ -211,7 +209,7 @@ public class DetectionPipeline {
         lastFrameTime = now;
 
         if (callback != null) {
-            callback.onPipelineResult(seatbeltDetections, drowsinessResult, fps,
+            callback.onPipelineResult(detections, drowsinessResult, fps,
                     bitmap.getWidth(), bitmap.getHeight());
         }
     }

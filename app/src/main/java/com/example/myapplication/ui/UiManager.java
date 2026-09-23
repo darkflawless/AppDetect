@@ -78,25 +78,28 @@ public class UiManager {
             }
         }
 
-        // Logic hiển thị (Ưu tiên các cảnh báo nguy hiểm trước)
-        if (dResult.isFaceMissing) {
+        // Logic hiển thị cảnh báo an toàn
+        if (dResult.isFaceMissing && !dResult.isDrowsy) {
             redFlashOverlay.setVisibility(View.VISIBLE);
-            statusIcon.setText("🫥");
+            statusIcon.setText("⚠️");
             statusText.setText("CẢNH BÁO - KHÔNG THẤY TÀI XẾ!");
             statusText.setTextColor(Color.RED);
             confidenceText.setText("Hệ thống mất dấu người lái!");
-        } else if (dResult.faceDetected && dResult.isDrowsy) {
+        } else if (dResult.isDistracted) {
+            // Ưu tiên cảnh báo mất tập trung khi tài xế quay đầu
+            redFlashOverlay.setVisibility(View.VISIBLE);
+            statusIcon.setText("👀");
+            statusText.setText("CẢNH BÁO - MẤT TẬP TRUNG!");
+            statusText.setTextColor(Color.RED);
+            confidenceText.setText(String.format("Hãy nhìn thẳng! (Góc quay: %.0f°)", dResult.headEulerY));
+        } else if (dResult.isDrowsy) {
+            // Cảnh báo buồn ngủ khi tài xế nhìn thẳng nhưng sụp mí
             redFlashOverlay.setVisibility(View.VISIBLE);
             statusIcon.setText("😴");
             statusText.setText("NGUY HIỂM - ĐANG NGỦ GẬT!");
             statusText.setTextColor(Color.RED);
-            confidenceText.setText(String.format("Hãy dừng xe! (EAR: %.2f)", dResult.ear));
-        } else if (dResult.faceDetected && dResult.isDistracted) {
-            redFlashOverlay.setVisibility(View.VISIBLE);
-            statusIcon.setText("🫣");
-            statusText.setText("CẢNH BÁO - MẤT TẬP TRUNG!");
-            statusText.setTextColor(Color.RED);
-            confidenceText.setText(String.format("Hãy nhìn thẳng! (Góc quay: %.0f°)", dResult.headEulerY));
+            confidenceText.setText(String.format("Hãy dừng xe! (AI: %.0f%% | EAR: %.2f)",
+                    dResult.drowsinessScore * 100f, dResult.ear));
         } else {
             redFlashOverlay.setVisibility(View.GONE);
 
@@ -116,14 +119,14 @@ public class UiManager {
                 statusText.setTextColor(Color.GREEN);
                 confidenceText.setText(String.format("Độ tin cậy: %.1f%%", bestBelt.confidence * 100f));
             } else {
-                statusIcon.setText("🔍");
+                statusIcon.setText("😊");
                 statusText.setText(
                         dResult.faceDetected ? "Đã thấy mặt - Đang theo dõi..." : "Đang tìm kiếm khuôn mặt...");
                 statusText.setTextColor(Color.WHITE);
 
                 if (dResult.faceDetected) {
-                    confidenceText.setText(String.format("EAR: %.2f | Yaw: %.0f°",
-                            dResult.ear, dResult.headEulerY));
+                    confidenceText.setText(String.format("AI: %.0f%% | EAR: %.2f | Yaw: %.0f°",
+                            dResult.drowsinessScore * 100f, dResult.ear, dResult.headEulerY));
                 } else {
                     confidenceText.setText("");
                 }

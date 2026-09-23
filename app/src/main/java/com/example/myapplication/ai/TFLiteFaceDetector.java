@@ -81,21 +81,18 @@ public class TFLiteFaceDetector {
 
         Interpreter.Options options = new Interpreter.Options();
 
-        // Thử bật GPU Delegate (auto-fallback về CPU nếu không được)
+        // Thử bật GPU Delegate với tối ưu FP16 (auto-fallback về CPU nếu không được)
         GpuDelegate tempDelegate = null;
-        try (CompatibilityList compatList = new CompatibilityList()) {
-            if (compatList.isDelegateSupportedOnThisDevice()) {
-                GpuDelegate.Options gpuOptions = compatList.getBestOptionsForThisDevice();
-                tempDelegate = new GpuDelegate(gpuOptions);
-                options.addDelegate(tempDelegate);
-                Log.i(TAG, "✅ GPU Delegate enabled");
-            } else {
-                options.setUseNNAPI(true);
-                Log.i(TAG, "⚡ NNAPI delegate enabled (GPU không hỗ trợ)");
-            }
-        } catch (Exception e) {
-            Log.w(TAG, "⚠️ GPU/NNAPI failed, dùng CPU: " + e.getMessage());
-            options.setUseNNAPI(false);
+        try {
+            GpuDelegate.Options gpuOptions = new GpuDelegate.Options();
+            gpuOptions.setPrecisionLossAllowed(true); // FP16 tăng tốc gấp đôi trên GPU
+            gpuOptions.setInferencePreference(GpuDelegate.Options.INFERENCE_PREFERENCE_FAST_SINGLE_ANSWER);
+            tempDelegate = new GpuDelegate(gpuOptions);
+            options.addDelegate(tempDelegate);
+            Log.i(TAG, "✅ GPU Delegate (FP16) enabled thành công!");
+        } catch (Throwable e) {
+            Log.w(TAG, "⚠️ GPU Delegate không khả dụng trên thiết bị này, fallback sang CPU XNNPACK: " + e.getMessage());
+            tempDelegate = null;
         }
         gpuDelegate = tempDelegate;
 
@@ -191,6 +188,11 @@ public class TFLiteFaceDetector {
 
         // 2. Bitmap → ByteBuffer float32 (tái dùng inputBuffer)
         fillInputBuffer(resized);
+
+        // Giải phóng ngay bitmap tạm để giải phóng RAM
+        if (resized != bitmap) {
+            resized.recycle();
+        }
 
         // 3. TFLite inference (tái dùng outputBuffer)
         interpreter.run(inputBuffer, outputBuffer);
