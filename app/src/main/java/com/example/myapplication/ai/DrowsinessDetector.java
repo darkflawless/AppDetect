@@ -3,17 +3,16 @@ package com.example.myapplication.ai;
 import android.content.Context;
 import android.content.res.AssetFileDescriptor;
 import android.graphics.Bitmap;
-import android.graphics.PointF;
 import android.graphics.RectF;
 import android.util.Log;
 
-import com.google.android.gms.tasks.Tasks;
-import com.google.mlkit.vision.common.InputImage;
-import com.google.mlkit.vision.face.Face;
-import com.google.mlkit.vision.face.FaceContour;
-import com.google.mlkit.vision.face.FaceDetection;
-import com.google.mlkit.vision.face.FaceDetector;
-import com.google.mlkit.vision.face.FaceDetectorOptions;
+import com.google.mediapipe.framework.image.BitmapImageBuilder;
+import com.google.mediapipe.framework.image.MPImage;
+import com.google.mediapipe.tasks.components.containers.NormalizedLandmark;
+import com.google.mediapipe.tasks.core.BaseOptions;
+import com.google.mediapipe.tasks.vision.core.RunningMode;
+import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker;
+import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarkerResult;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -28,18 +27,15 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
-import java.util.concurrent.ExecutionException;
 
 /**
  * DrowsinessDetector - Nhận diện buồn ngủ thông minh sử dụng:
- * 1. TFLite Face Detector (YOLO) định vị khuôn mặt tài xế.
- * 2. Google ML Kit Face Mesh trích xuất 6 đặc trưng hình học chuẩn:
+ * 1. MediaPipe FaceLandmarker trích xuất 468 landmark 3D và ma trận biến đổi
+ * không gian.
+ * 2. Tính 6 đặc trưng hình học chuẩn xác khớp 100% với Colab huấn luyện:
  * [EAR_Left, EAR_Right, MAR, Pitch, Yaw, Roll].
- * 3. Quét toàn bộ khung hình (100% full frame) đảm bảo không bị mất dấu mặt khi
- * cầm điện thoại.
- * 4. Bộ điều tiết thời gian (Time-based Resampling ~33ms) chuẩn hóa nhịp 30
- * FPS.
- * 5. Mô hình LSTM (Cửa sổ trượt 30 frame) chạy qua TFLite.
+ * 3. Mô hình BiLSTM (Cửa sổ trượt 15 frame) kết hợp cơ chế chốt giữ liên tục
+ * khi vẫn nhắm mắt.
  */
 public class DrowsinessDetector {
 
@@ -47,65 +43,66 @@ public class DrowsinessDetector {
 
     // Tên file model và scaler trong thư mục assets
     private static final String LSTM_MODEL_FP16 = "drowsiness_detector_fp16.tflite";
-    private static final String LSTM_MODEL_F32 = "drowsiness_detector.tflite";
     private static final String SCALER_PARAMS_FILE = "scaler_params.json";
+    private static final String FACE_LANDMARKER_MODEL = "face_landmarker.task";
 
-    // Cấu hình Cửa sổ trượt LSTM
-    public static final int WINDOW_SIZE = 30; // 30 frame tương đương 1.0 giây ở 30 FPS
+    // Cấu hình Cửa sổ trượt LSTM: 15 frame liên tiếp (Khớp 100% Colab)
+    public static final int WINDOW_SIZE = 15;
     public static final int NUM_FEATURES = 6; // [EAR_Left, EAR_Right, MAR, pitch, yaw, roll]
     public static final float DROWSINESS_THRESHOLD = 0.40f; // Ngưỡng nhận diện nhạy và chuẩn xác (40%)
 
-    // Bộ điều tiết lấy mẫu theo thời gian (Time-based Resampling)
-    public static final long TARGET_FRAME_INTERVAL_MS = 33L; // Chuẩn 30 FPS (1000ms / 30 = 33.3ms)
-    private static final long MIN_FRAME_INTERVAL_MS = 25L; // Bỏ qua frame thừa nếu camera chạy quá nhanh (> 40 FPS)
-    private static final long MAX_INTERPOLATION_STEPS = 6; // Bù tối đa 6 nhịp (~200ms) nếu camera bị tụt FPS
+    // Ngưỡng khép chặt mí mắt (Dành riêng cho trạng thái ngủ nhắm nghiền mắt)
+    // Khi mí mắt khép chặt vào nhau, EAR luôn tụt sâu xuống dưới 0.17 ở mọi dáng
+    // mắt.
+    public static final float EYES_CLOSED_EAR_THRESHOLD = 0.15f;
 
-    // Các ngưỡng bổ trợ cảnh báo
-    public static final float EAR_THRESHOLD = 0.20f; // Mốc tham khảo nhắm mắt đo thời lượng
-    public static final float EYE_OPEN_EAR_THRESHOLD = 0.21f; // Mốc xác nhận mắt đã mở tỉnh táo (thích ứng tốt cho cả
-                                                              // mắt nhỏ)
-    public static final int OPEN_EYE_FRAMES_TO_CLEAR = 4; // Chỉ cần 4 frame liên tiếp mở mắt (~0.12s - 0.15s) để tắt
-                                                          // cảnh báo ngay
-    public static final long CLOSED_EYE_TIME_THRESHOLD_MS = 1500L; // Nhắm mắt liên tục 1.5s = chắc chắn buồn ngủ
-                                                                   // (Safety backup)
-    public static final float MAR_THRESHOLD = 0.70f; // Ngưỡng phát hiện ngáp
-    public static final float DISTRACTION_YAW_THRESHOLD = 35.0f; // Góc quay đầu > 35 độ (chuẩn ADAS, không lo bị báo nhầm khi cầm máy)
+    // Các ngưỡng bổ trợ cảnh báo an toàn
+    public static final float MAR_THRESHOLD = 0.65f; // Ngưỡng phát hiện ngáp
+    public static final float DISTRACTION_YAW_THRESHOLD = 35.0f; // Góc quay đầu > 35 độ (chuẩn ADAS)
     public static final float HEAD_CENTER_YAW_THRESHOLD = 18.0f; // Vùng an toàn nhìn thẳng (Hysteresis)
-    public static final int CENTER_HEAD_FRAMES_TO_CLEAR = 3; // Chỉ cần 3 frame liên tiếp nhìn thẳng (~0.1s) để tắt đỏ ngay lập tức
+    public static final int CENTER_HEAD_FRAMES_TO_CLEAR = 3; // 3 frame liên tiếp nhìn thẳng để tắt đỏ ngay
     public static final long DISTRACTION_TIME_THRESHOLD_MS = 2500L; // Quay đầu 2.5 giây = báo động mất tập trung
     public static final long FACE_MISSING_TIME_THRESHOLD_MS = 3000L; // Mất mặt 3 giây = báo động không thấy tài xế
-    private static final long ALERT_PERSISTENCE_MS = 1000L; // Duy trì trạng thái cảnh báo tối thiểu 1 giây nếu chưa nhìn thẳng
+    public static final long ALERT_PERSISTENCE_MS = 1000L; // Duy trì trạng thái cảnh báo 1 giây (1.0s) sau khi mở mắt
 
-    // Cấu hình vùng quét: Quét 100% khung hình để không bao giờ bị cắt mất mặt khi
-    // cầm điện thoại
-    private static final float DRIVER_REGION_FRACTION = 1.0f;
-    private static final float FACE_CROP_PADDING_X = 0.25f;
+    // Padding cho Bounding Box hiển thị UI
+    private static final float FACE_CROP_PADDING_X = 0.15f;
+
+    // Các chỉ số Landmark chuẩn từ MediaPipe (Khớp 100% với file trichXuat.ipynb
+    // lúc train)
+    private static final int[] LEFT_EYE_CORNERS = { 33, 133 };
+    private static final int[] LEFT_EYE_VERT1 = { 160, 144 };
+    private static final int[] LEFT_EYE_VERT2 = { 158, 153 };
+
+    private static final int[] RIGHT_EYE_CORNERS = { 362, 263 };
+    private static final int[] RIGHT_EYE_VERT1 = { 385, 380 };
+    private static final int[] RIGHT_EYE_VERT2 = { 387, 373 };
+
+    private static final int[] MOUTH_CORNERS = { 61, 291 };
+    private static final int[] MOUTH_LIPS = { 13, 14 };
 
     // Detectors
-    private final TFLiteFaceDetector tfliteDetector;
-    private final FaceDetector mlkitDetector;
+    private final FaceLandmarker faceLandmarker;
     private final Interpreter lstmInterpreter;
 
-    // Bộ nhớ đệm Cửa sổ trượt 30 frame
+    // Bộ nhớ đệm Cửa sổ trượt 15 frame
     private final Deque<float[]> sequenceBuffer = new ArrayDeque<>(WINDOW_SIZE);
     private final float[][][] lstmInputBuffer = new float[1][WINDOW_SIZE][NUM_FEATURES];
     private final float[][] lstmOutputBuffer = new float[1][1];
 
-    // Bộ tham số chuẩn hóa (Khớp 100% với StandardScaler lúc train)
+    // Bộ tham số chuẩn hóa backup (Khớp 100% với scaler_params.json từ Colab)
     private final float[] scalerMean = new float[] {
-            0.219958f, 0.251387f, 0.505516f, 0.213905f, 15.005088f, 0.392417f
+            0.30109289573440345f, 0.31031264726325436f, 0.13542384890804707f,
+            3.0011908976013073f, 14.141056761247397f, 2.122260188271392f
     };
     private final float[] scalerStd = new float[] {
-            0.091953f, 0.100373f, 0.202773f, 7.984931f, 18.029117f, 4.999533f
+            0.10028701967373528f, 0.09783590447246555f, 0.2004178641198358f,
+            9.815895911316911f, 15.381944654242444f, 5.844676978018849f
     };
 
-    // Quản lý nhịp thời gian lấy mẫu và logging
-    private long lastSampleTimestampMs = 0;
-    private float lastDrowsinessScore = 0f;
+    // Logging & Timers
     private long lastLogTimeMs = 0;
-
-    // Timers & Trạng thái
-    private long firstClosedEyeTime = 0;
+    private long firstDrowsyTime = 0;
     private long lastDrowsyTime = 0;
     private long firstDistractedTime = 0;
     private long lastDistractedTime = 0;
@@ -113,15 +110,9 @@ public class DrowsinessDetector {
     private float lastKnownEar = 0.3f;
     private float lastKnownYaw = 0f;
 
-    // Chốt trạng thái buồn ngủ & mất tập trung (State Latch & Instant Release)
+    // Chốt trạng thái buồn ngủ & mất tập trung
     private boolean isDrowsyActive = false;
-    private int consecutiveOpenEyeFrames = 0;
     private int consecutiveCenterHeadFrames = 0;
-
-    // Quản lý Face Tracking (Tối ưu FPS bằng cách bỏ qua TFLite mỗi frame)
-    private RectF lastTrackedFaceBbox = null;
-    private int consecutiveTrackFrames = 0;
-    private static final int MAX_TRACK_INTERVAL_FRAMES = 5; // Cập nhật lại TFLite sau mỗi 5 frame (~150ms)
 
     // -------------------------------------------------------------------------
     // Kết quả trả về cho UI và Backend
@@ -140,7 +131,7 @@ public class DrowsinessDetector {
         public float drowsinessScore = 0f; // Xác suất buồn ngủ từ LSTM (0.0 -> 1.0)
         public boolean isDistracted = false;
         public boolean isFaceMissing = false;
-        public long closedEyeDurationMs = 0;
+        public long closedEyeDurationMs = 0; // Thời lượng buồn ngủ (ms) gửi lên Server
         public long distractedDurationMs = 0;
         public RectF faceBbox = null;
     }
@@ -149,37 +140,35 @@ public class DrowsinessDetector {
     // Khởi tạo Detector
     // -------------------------------------------------------------------------
     public DrowsinessDetector(Context context) throws IOException {
-        tfliteDetector = new TFLiteFaceDetector(context);
-
-        FaceDetectorOptions options = new FaceDetectorOptions.Builder()
-                .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
-                .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
-                .setContourMode(FaceDetectorOptions.CONTOUR_MODE_ALL)
-                .setMinFaceSize(0.30f)
+        // 1. Khởi tạo MediaPipe Face Landmarker
+        BaseOptions baseOptions = BaseOptions.builder()
+                .setModelAssetPath(FACE_LANDMARKER_MODEL)
                 .build();
-        mlkitDetector = FaceDetection.getClient(options);
 
+        FaceLandmarker.FaceLandmarkerOptions landmarkerOptions = FaceLandmarker.FaceLandmarkerOptions.builder()
+                .setBaseOptions(baseOptions)
+                .setOutputFacialTransformationMatrixes(true)
+                .setNumFaces(1)
+                .setRunningMode(RunningMode.IMAGE)
+                .build();
+
+        faceLandmarker = FaceLandmarker.createFromOptions(context, landmarkerOptions);
+
+        // 2. Nạp tham số Scaler từ JSON (nếu có)
         loadScalerParams(context);
 
+        // 3. Khởi tạo Interpreter LSTM TFLite
         MappedByteBuffer modelBuffer = loadModelFile(context);
         Interpreter.Options lstmOptions = new Interpreter.Options();
         lstmOptions.setNumThreads(2);
         lstmOptions.setUseXNNPACK(true);
         lstmInterpreter = new Interpreter(modelBuffer, lstmOptions);
-        Log.i(TAG, "Đã khởi tạo DrowsinessDetector (Quét toàn màn hình 100% + LSTM 30 FPS)!");
+        Log.i(TAG, "Đã khởi tạo DrowsinessDetector thành công (MediaPipe FaceLandmarker + LSTM 15 frames)!");
     }
 
     private MappedByteBuffer loadModelFile(Context context) throws IOException {
-        String chosenFile = LSTM_MODEL_FP16;
-        try {
-            AssetFileDescriptor fd = context.getAssets().openFd(chosenFile);
-            fd.close();
-        } catch (Exception e) {
-            chosenFile = LSTM_MODEL_F32;
-        }
-
-        Log.i(TAG, "Đang nạp mô hình LSTM: " + chosenFile);
-        AssetFileDescriptor fileDescriptor = context.getAssets().openFd(chosenFile);
+        Log.i(TAG, "Đang nạp mô hình LSTM: " + LSTM_MODEL_FP16);
+        AssetFileDescriptor fileDescriptor = context.getAssets().openFd(LSTM_MODEL_FP16);
         try (FileInputStream inputStream = new FileInputStream(fileDescriptor.getFileDescriptor())) {
             FileChannel fileChannel = inputStream.getChannel();
             long startOffset = fileDescriptor.getStartOffset();
@@ -214,133 +203,114 @@ public class DrowsinessDetector {
     // -------------------------------------------------------------------------
     public DrowsinessResult detect(Bitmap bitmap, long timestampMs) {
         DrowsinessResult result = new DrowsinessResult();
+        if (bitmap == null || bitmap.isRecycled()) {
+            return result;
+        }
 
         try {
             long currentTimeMs = (timestampMs > 0) ? timestampMs : System.currentTimeMillis();
-            long elapsedSinceLastSample = (lastSampleTimestampMs == 0)
-                    ? TARGET_FRAME_INTERVAL_MS
-                    : (currentTimeMs - lastSampleTimestampMs);
 
-            // Bước 1: Quét vùng khuôn mặt (Toàn bộ khung hình)
-            Bitmap driverRegion = cropDriverRegion(bitmap);
+            // Bước 1: Trích xuất Face Landmarker trực tiếp từ Bitmap qua MediaPipe
+            MPImage mpImage = new BitmapImageBuilder(bitmap).build();
+            FaceLandmarkerResult landmarkerResult = faceLandmarker.detect(mpImage);
 
-            // Bước 2: Tìm hoặc bám vết khuôn mặt (Face Tracking để tăng tốc FPS)
-            RectF faceBboxInCrop = null;
-            boolean isTrackingFrame = false;
+            // Bước 2: Kiểm tra nếu không phát hiện khuôn mặt
+            if (landmarkerResult == null || landmarkerResult.faceLandmarks().isEmpty()) {
+                handleFaceMissing(result, currentTimeMs);
 
-            if (lastTrackedFaceBbox != null && consecutiveTrackFrames < MAX_TRACK_INTERVAL_FRAMES) {
-                faceBboxInCrop = lastTrackedFaceBbox;
-                isTrackingFrame = true;
-            } else {
-                faceBboxInCrop = tfliteDetector.detectBestFace(driverRegion);
-            }
+                // Đẩy vector 0 vào hàng đợi và chạy đánh giá LSTM
+                pushToSequence(0f, 0f, 0f, 0f, 0f, 0f);
+                evaluateLstmDrowsiness(result);
 
-            // Bước 3: Crop khuôn mặt cho ML Kit
-            List<Face> faces = null;
-            if (faceBboxInCrop != null) {
-                Bitmap faceCrop = cropFace(driverRegion, faceBboxInCrop);
-                InputImage inputImage = InputImage.fromBitmap(faceCrop, 0);
-                faces = Tasks.await(mlkitDetector.process(inputImage));
-                if (faceCrop != null && faceCrop != driverRegion) {
-                    faceCrop.recycle(); // Giải phóng Bitmap crop để tránh áp lực GC
+                // Kiểm tra duy trì cảnh báo nếu vừa mới kích hoạt trong vòng 1 giây
+                boolean withinAlertWindow = (lastDrowsyTime > 0
+                        && (currentTimeMs - lastDrowsyTime < ALERT_PERSISTENCE_MS));
+                result.isDrowsy = isDrowsyActive || withinAlertWindow;
+                if (!result.isDrowsy) {
+                    isDrowsyActive = false;
+                    firstDrowsyTime = 0;
+                    result.closedEyeDurationMs = 0;
+                } else if (firstDrowsyTime > 0) {
+                    result.closedEyeDurationMs = currentTimeMs - firstDrowsyTime;
                 }
-
-                // Nếu đang dùng tracking mà ML Kit không tìm thấy mặt -> thử fallback lại bằng
-                // TFLite
-                if ((faces == null || faces.isEmpty()) && isTrackingFrame) {
-                    lastTrackedFaceBbox = null;
-                    consecutiveTrackFrames = 0;
-                    faceBboxInCrop = tfliteDetector.detectBestFace(driverRegion);
-                    if (faceBboxInCrop != null) {
-                        Bitmap retryFaceCrop = cropFace(driverRegion, faceBboxInCrop);
-                        InputImage retryInput = InputImage.fromBitmap(retryFaceCrop, 0);
-                        faces = Tasks.await(mlkitDetector.process(retryInput));
-                        if (retryFaceCrop != null && retryFaceCrop != driverRegion) {
-                            retryFaceCrop.recycle();
-                        }
-                    }
-                }
-            }
-
-            // Nếu hoàn toàn không phát hiện khuôn mặt:
-            if (faceBboxInCrop == null || faces == null || faces.isEmpty()) {
-                lastTrackedFaceBbox = null;
-                consecutiveTrackFrames = 0;
-                handleFaceMissing(result);
-
-                if (elapsedSinceLastSample >= MIN_FRAME_INTERVAL_MS) {
-                    int steps = calculateSteps(elapsedSinceLastSample);
-                    for (int s = 0; s < steps; s++) {
-                        pushToSequence(0f, 0f, 0f, 0f, 0f, 0f);
-                    }
-                    lastSampleTimestampMs = currentTimeMs;
-                    evaluateLstmDrowsiness(result);
-                    lastDrowsinessScore = result.drowsinessScore;
-                } else {
-                    result.drowsinessScore = lastDrowsinessScore;
-                }
-
-                // Chốt giữ cảnh báo nếu đang trong đợt báo động (dù mất mặt do gục đầu)
-                result.isDrowsy = isDrowsyActive
-                        || (result.drowsinessScore >= DROWSINESS_THRESHOLD)
-                        || (result.closedEyeDurationMs >= CLOSED_EYE_TIME_THRESHOLD_MS)
-                        || (lastDrowsyTime > 0 && (currentTimeMs - lastDrowsyTime < ALERT_PERSISTENCE_MS));
 
                 if (currentTimeMs - lastLogTimeMs >= 500L) {
                     lastLogTimeMs = currentTimeMs;
                     if (result.isDrowsy) {
-                        Log.w(TAG,
-                                String.format(
-                                        "🚨 [DROWSY-HEAD_DOWN] Mất dấu mặt khi đang ngủ gật! Active=%b | Nhắm: %dms",
-                                        isDrowsyActive, result.closedEyeDurationMs));
+                        Log.w(TAG, String.format(
+                                "🚨 [DROWSY-HEAD_DOWN] Mất dấu mặt khi đang ngủ gật! Active=%b | Thời lượng: %dms",
+                                isDrowsyActive, result.closedEyeDurationMs));
                     }
                 }
                 return result;
             }
 
-            // ĐÃ TÌM THẤY MẶT VÀ MLKIT XÁC NHẬN!
-            lastTrackedFaceBbox = faceBboxInCrop;
-            consecutiveTrackFrames++;
+            // Bước 3: ĐÃ TÌM THẤY KHUÔN MẶT!
             firstFaceMissingTime = 0;
             result.faceDetected = true;
 
-            RectF faceBboxFull = mapBboxToFullFrame(faceBboxInCrop);
-            float padX = (faceBboxFull.right - faceBboxFull.left) * FACE_CROP_PADDING_X;
+            List<NormalizedLandmark> faceLm = landmarkerResult.faceLandmarks().get(0);
+
+            // Tính Bounding Box khuôn mặt từ các landmark
+            float minX = 1f, minY = 1f, maxX = 0f, maxY = 0f;
+            for (NormalizedLandmark lm : faceLm) {
+                float x = lm.x();
+                float y = lm.y();
+                if (x < minX)
+                    minX = x;
+                if (x > maxX)
+                    maxX = x;
+                if (y < minY)
+                    minY = y;
+                if (y > maxY)
+                    maxY = y;
+            }
+            float padX = (maxX - minX) * FACE_CROP_PADDING_X;
             result.faceBbox = new RectF(
-                    Math.max(0f, faceBboxFull.left - padX),
-                    faceBboxFull.top,
-                    Math.min(1f, faceBboxFull.right + padX),
-                    faceBboxFull.bottom);
+                    Math.max(0f, minX - padX),
+                    Math.max(0f, minY),
+                    Math.min(1f, maxX + padX),
+                    Math.min(1f, maxY));
 
-            Face face = faces.get(0);
-            FaceContour leftEyeContour = face.getContour(FaceContour.LEFT_EYE);
-            FaceContour rightEyeContour = face.getContour(FaceContour.RIGHT_EYE);
-            result.earLeft = (leftEyeContour != null) ? calcEar(leftEyeContour.getPoints()) : 0.0f;
-            result.earRight = (rightEyeContour != null) ? calcEar(rightEyeContour.getPoints()) : 0.0f;
+            // Bước 4: Tính EAR (Left & Right) và MAR theo đúng công thức Colab
+            result.earLeft = computeEar(faceLm, LEFT_EYE_CORNERS, LEFT_EYE_VERT1, LEFT_EYE_VERT2);
+            result.earRight = computeEar(faceLm, RIGHT_EYE_CORNERS, RIGHT_EYE_VERT1, RIGHT_EYE_VERT2);
+            result.mar = computeMar(faceLm);
 
-            FaceContour upperLipBottom = face.getContour(FaceContour.UPPER_LIP_BOTTOM);
-            FaceContour lowerLipTop = face.getContour(FaceContour.LOWER_LIP_TOP);
-            if (upperLipBottom != null && lowerLipTop != null &&
-                    upperLipBottom.getPoints().size() >= 9 && lowerLipTop.getPoints().size() >= 9) {
-                result.mar = calcMar(upperLipBottom.getPoints(), lowerLipTop.getPoints());
-            } else {
-                FaceContour upperLipTop = face.getContour(FaceContour.UPPER_LIP_TOP);
-                FaceContour lowerLipBottom = face.getContour(FaceContour.LOWER_LIP_BOTTOM);
-                if (upperLipTop != null && lowerLipBottom != null) {
-                    result.mar = calcMarFallback(upperLipTop.getPoints(), lowerLipBottom.getPoints());
+            // Bước 5: Trích xuất góc quay Euler (Pitch, Yaw, Roll) từ ma trận 3D của
+            // MediaPipe
+            float pitch = 0.0f;
+            float yaw = 0.0f;
+            float roll = 0.0f;
+            if (landmarkerResult.facialTransformationMatrixes().isPresent()) {
+                List<float[]> matrices = landmarkerResult.facialTransformationMatrixes().get();
+                if (!matrices.isEmpty()) {
+                    float[] mat = matrices.get(0);
+                    // Ma trận 4x4 lưu theo thứ tự column-major trong flat array 16 phần tử:
+                    // mat[0]=r00, mat[1]=r10, mat[2]=r20
+                    // mat[6]=r21, mat[10]=r22
+                    float m00 = mat[0];
+                    float m10 = mat[1];
+                    float m20 = mat[2];
+                    float m21 = mat[6];
+                    float m22 = mat[10];
+
+                    double sy = Math.sqrt(m00 * m00 + m10 * m10);
+                    if (sy > 1e-6) {
+                        pitch = (float) Math.toDegrees(Math.atan2(m21, m22));
+                        yaw = (float) Math.toDegrees(Math.atan2(-m20, sy));
+                        roll = (float) Math.toDegrees(Math.atan2(m10, m00));
+                    }
                 }
             }
+            result.headEulerX = pitch;
+            result.headEulerY = yaw;
+            result.headEulerZ = roll;
 
-            result.headEulerX = face.getHeadEulerAngleX();
-            result.headEulerY = face.getHeadEulerAngleY();
-            result.headEulerZ = face.getHeadEulerAngleZ();
-
-            // Tính EAR thông minh chống che khuất (Anti-occlusion):
-            // Khi quay đầu nghiêng (|Yaw| > 15 độ) hoặc 1 bên mắt bị sống mũi che (ear <=
-            // 0.08):
-            // Lấy max(earLeft, earRight) vì con mắt phía trước phản ánh đúng mắt đang mở!
+            // Tính EAR chống che khuất (Anti-occlusion):
+            // Khi quay đầu (|Yaw| > 15 độ) hoặc 1 bên mắt bị sống mũi che (ear <= 0.05):
             boolean isHeadTurned = Math.abs(result.headEulerY) > 15.0f;
-            if (isHeadTurned || result.earLeft <= 0.08f || result.earRight <= 0.08f) {
+            if (isHeadTurned || result.earLeft <= 0.05f || result.earRight <= 0.05f) {
                 result.ear = Math.max(result.earLeft, result.earRight);
             } else {
                 result.ear = (result.earLeft + result.earRight) / 2.0f;
@@ -353,38 +323,28 @@ public class DrowsinessDetector {
             float effEarL = result.earLeft;
             float effEarR = result.earRight;
             if (isHeadTurned) {
-                if (effEarL <= 0.08f && effEarR > 0.08f)
+                if (effEarL <= 0.05f && effEarR > 0.05f)
                     effEarL = effEarR;
-                else if (effEarR <= 0.08f && effEarL > 0.08f)
+                else if (effEarR <= 0.05f && effEarL > 0.05f)
                     effEarR = effEarL;
             }
 
-            // Bước 4: Điều tiết nhịp thời gian đẩy vào LSTM
-            if (elapsedSinceLastSample >= MIN_FRAME_INTERVAL_MS) {
-                int steps = calculateSteps(elapsedSinceLastSample);
+            // Bước 6: Đẩy đặc trưng vào chuỗi và chạy mô hình LSTM (1 frame = 1 bước trượt)
+            pushToSequence(
+                    effEarL,
+                    effEarR,
+                    result.mar,
+                    result.headEulerX,
+                    result.headEulerY,
+                    result.headEulerZ);
 
-                for (int s = 0; s < steps; s++) {
-                    pushToSequence(
-                            effEarL,
-                            effEarR,
-                            result.mar,
-                            result.headEulerX,
-                            result.headEulerY,
-                            result.headEulerZ);
-                }
+            evaluateLstmDrowsiness(result);
 
-                lastSampleTimestampMs = currentTimeMs;
-                evaluateLstmDrowsiness(result);
-                lastDrowsinessScore = result.drowsinessScore;
-
-            } else {
-                result.drowsinessScore = lastDrowsinessScore;
-            }
-
-            // Bước 5: Kiểm tra các trạng thái bổ trợ & Chốt cảnh báo (State Latch)
+            // Bước 7: Kiểm tra hành vi ngáp
             result.isYawning = (result.mar > MAR_THRESHOLD);
 
-            // Kiểm tra trạng thái quay đầu mất tập trung (kết hợp Hysteresis & Instant Release)
+            // Bước 8: Kiểm tra trạng thái quay đầu mất tập trung (Hysteresis & Instant
+            // Release)
             boolean isDistractedTurn = Math.abs(result.headEulerY) > DISTRACTION_YAW_THRESHOLD;
             boolean isLookingStraight = Math.abs(result.headEulerY) <= HEAD_CENTER_YAW_THRESHOLD;
 
@@ -398,7 +358,6 @@ public class DrowsinessDetector {
                 if (isLookingStraight) {
                     consecutiveCenterHeadFrames++;
                     if (consecutiveCenterHeadFrames >= CENTER_HEAD_FRAMES_TO_CLEAR) {
-                        // Người lái đã nhìn thẳng lại đủ số frame -> DẬP TẮT CẢNH BÁO ĐỎ NGAY LẬP TỨC!
                         lastDistractedTime = 0;
                     }
                 } else {
@@ -415,60 +374,42 @@ public class DrowsinessDetector {
             result.isDistracted = (currentDistractedDuration >= DISTRACTION_TIME_THRESHOLD_MS)
                     || (lastDistractedTime > 0 && (currentTimeMs - lastDistractedTime < ALERT_PERSISTENCE_MS));
 
-            // Đo thời lượng nhắm mắt liên tục:
-            // CHÚ Ý: Nếu đang quay đầu (isDistractedTurn == true), tuyệt đối KHÔNG đếm thời
-            // gian nhắm mắt ngủ gật!
-            if (result.ear < EAR_THRESHOLD && !isDistractedTurn) {
-                if (firstClosedEyeTime == 0) {
-                    firstClosedEyeTime = currentTimeMs;
-                }
-                result.closedEyeDurationMs = currentTimeMs - firstClosedEyeTime;
-            } else {
-                firstClosedEyeTime = 0;
-                result.closedEyeDurationMs = 0;
-            }
-
-            // 1. Kiểm tra mắt thực tế ở frame hiện tại có đang mở to tỉnh táo không
-            boolean isCurrentlyEyesOpen = (result.ear >= EYE_OPEN_EAR_THRESHOLD);
-
-            // 2. Quyết định trạng thái buồn ngủ:
-            // Nếu đang quay đầu mất tập trung, không kích hoạt cảnh báo ngủ gật mới
+            // Bước 9: Quyết định trạng thái buồn ngủ thông minh & Giữ cảnh báo liên tục khi
+            // vẫn nhắm mắt
             boolean isLstmDrowsy = (result.drowsinessScore >= DROWSINESS_THRESHOLD) && !isDistractedTurn;
-            boolean isDurationDrowsy = (result.closedEyeDurationMs >= CLOSED_EYE_TIME_THRESHOLD_MS);
-            boolean isTriggered = (isLstmDrowsy || isDurationDrowsy);
+            boolean isEyesPhysicallyClosed = (result.ear < EYES_CLOSED_EAR_THRESHOLD) && !isDistractedTurn;
 
-            if (isDrowsyActive) {
-                // ĐANG TRONG TRẠNG THÁI CẢNH BÁO: Ưu tiên kiểm tra mắt thực tế để giải phóng
-                // còi/màn hình đỏ
-                if (isCurrentlyEyesOpen) {
-                    // Mắt thực tế đang mở to -> Bắt đầu đếm số frame mở mắt liên tục
-                    consecutiveOpenEyeFrames++;
-                    if (consecutiveOpenEyeFrames >= OPEN_EYE_FRAMES_TO_CLEAR) {
-                        // Người lái đã mở to mắt liên tục đủ số frame -> CHÍNH THỨC TẮT CẢNH BÁO!
-                        isDrowsyActive = false;
-                        consecutiveOpenEyeFrames = 0;
-                        lastDrowsyTime = 0; // Hủy thời gian chờ cố định để tắt còi và màn hình đỏ ngay lập tức
+            // Đang có biểu hiện buồn ngủ: Hoặc do AI phát hiện, hoặc do mắt vẫn đang khép
+            // chặt khi đang trong đợt cảnh báo
+            boolean isCurrentlyDrowsy = isLstmDrowsy || (isDrowsyActive && isEyesPhysicallyClosed);
+
+            if (isCurrentlyDrowsy) {
+                isDrowsyActive = true;
+                lastDrowsyTime = currentTimeMs; // Liên tục gia hạn mốc thời gian -> Còi kêu liên tục, không bao giờ tắt
+                                                // khi vẫn nhắm
+                if (firstDrowsyTime == 0) {
+                    firstDrowsyTime = currentTimeMs;
+                }
+                result.closedEyeDurationMs = currentTimeMs - firstDrowsyTime;
+            } else {
+                // Người lái KHÔNG còn biểu hiện buồn ngủ (mắt đã mở ra VÀ AI đã hạ điểm):
+                // Duy trì cảnh báo thêm 1.0 giây sau khi mở mắt để chống giật còi
+                if (lastDrowsyTime > 0 && (currentTimeMs - lastDrowsyTime < ALERT_PERSISTENCE_MS)) {
+                    if (firstDrowsyTime > 0) {
+                        result.closedEyeDurationMs = currentTimeMs - firstDrowsyTime;
                     }
                 } else {
-                    // Vẫn đang nhắm mắt hoặc chập chờn sụp mí -> Reset bộ đếm mở mắt & gia hạn cảnh
-                    // báo
-                    consecutiveOpenEyeFrames = 0;
-                    lastDrowsyTime = currentTimeMs;
-                }
-            } else {
-                // CHƯA TRONG TRẠNG THÁI CẢNH BÁO: Phát hiện buồn ngủ thì mới kích hoạt (chỉ khi
-                // không đang quay đầu)
-                if (isTriggered && !isDistractedTurn) {
-                    isDrowsyActive = true;
-                    consecutiveOpenEyeFrames = 0;
-                    lastDrowsyTime = currentTimeMs;
+                    // Đã qua 1.0 giây sau khi mở mắt tỉnh táo -> Chính thức tắt cảnh báo
+                    isDrowsyActive = false;
+                    firstDrowsyTime = 0;
+                    result.closedEyeDurationMs = 0;
                 }
             }
 
             result.isDrowsy = isDrowsyActive
                     || (lastDrowsyTime > 0 && (currentTimeMs - lastDrowsyTime < ALERT_PERSISTENCE_MS));
 
-            // In log kiểm chứng theo thời gian thực (mỗi 0.5s in 1 lần để theo dõi)
+            // Log theo thời gian thực (0.5s / lần)
             if (currentTimeMs - lastLogTimeMs >= 500L) {
                 lastLogTimeMs = currentTimeMs;
                 if (result.isDistracted) {
@@ -476,32 +417,19 @@ public class DrowsinessDetector {
                             result.headEulerY, result.distractedDurationMs));
                 } else if (result.isDrowsy) {
                     Log.w(TAG, String.format(
-                            "🚨 [DROWSY] CẢNH BÁO BUỒN NGỦ (Active=%b, OpenFrames=%d/%d)! AI: %.1f%% | EAR: %.2f | Nhắm: %dms",
-                            isDrowsyActive, consecutiveOpenEyeFrames, OPEN_EYE_FRAMES_TO_CLEAR,
-                            result.drowsinessScore * 100f, result.ear, result.closedEyeDurationMs));
+                            "🚨 [DROWSY] CẢNH BÁO BUỒN NGỦ (Active=%b)! AI: %.1f%% | EAR: %.2f | Dur: %dms",
+                            isDrowsyActive, result.drowsinessScore * 100f, result.ear, result.closedEyeDurationMs));
                 } else {
                     Log.d(TAG, String.format("✅ [AWAKE] TỈNH TÁO | AI: %.1f%% | EAR: %.2f | Yaw: %.1f°",
                             result.drowsinessScore * 100f, result.ear, result.headEulerY));
                 }
             }
 
-        } catch (ExecutionException | InterruptedException e) {
-            Log.e(TAG, "Lỗi khi xử lý frame: " + e.getMessage());
+        } catch (Exception e) {
+            Log.e(TAG, "Lỗi khi xử lý frame: " + e.getMessage(), e);
         }
 
         return result;
-    }
-
-    private int calculateSteps(long elapsedMs) {
-        if (elapsedMs > 500L) {
-            return 1;
-        }
-        int steps = (int) Math.round((double) elapsedMs / TARGET_FRAME_INTERVAL_MS);
-        if (steps < 1)
-            steps = 1;
-        if (steps > MAX_INTERPOLATION_STEPS)
-            steps = (int) MAX_INTERPOLATION_STEPS;
-        return steps;
     }
 
     private void pushToSequence(float earL, float earR, float mar, float pitch, float yaw, float roll) {
@@ -549,178 +477,94 @@ public class DrowsinessDetector {
         result.drowsinessScore = score;
     }
 
-    private void handleFaceMissing(DrowsinessResult result) {
+    private void handleFaceMissing(DrowsinessResult result, long currentTimeMs) {
         boolean isTurningHead = Math.abs(lastKnownYaw) >= 28.0f;
-        boolean likelySleeping = isDrowsyActive || (!isTurningHead && lastKnownEar < EAR_THRESHOLD);
-
         consecutiveCenterHeadFrames = 0;
 
-        if (likelySleeping) {
-            firstFaceMissingTime = 0;
-            firstDistractedTime = 0;
-            if (firstClosedEyeTime == 0) {
-                firstClosedEyeTime = System.currentTimeMillis();
+        if (isDrowsyActive) {
+            // Đang trong trạng thái buồn ngủ mà mất mặt (gục đầu xuống) -> liên tục gia hạn
+            // cảnh báo
+            lastDrowsyTime = currentTimeMs;
+            if (firstDrowsyTime == 0) {
+                firstDrowsyTime = currentTimeMs;
             }
-            long closedDuration = System.currentTimeMillis() - firstClosedEyeTime;
-            if (closedDuration >= CLOSED_EYE_TIME_THRESHOLD_MS) {
-                lastDrowsyTime = System.currentTimeMillis();
-                isDrowsyActive = true;
-            }
-            if (isDrowsyActive) {
-                lastDrowsyTime = System.currentTimeMillis();
-                consecutiveOpenEyeFrames = 0;
-            }
-            result.closedEyeDurationMs = closedDuration;
-            result.isDrowsy = isDrowsyActive || (closedDuration >= CLOSED_EYE_TIME_THRESHOLD_MS)
-                    || (lastDrowsyTime > 0 && (System.currentTimeMillis() - lastDrowsyTime < ALERT_PERSISTENCE_MS));
+            result.closedEyeDurationMs = currentTimeMs - firstDrowsyTime;
+            result.isDrowsy = true;
         } else {
-            firstClosedEyeTime = 0;
             if (isTurningHead) {
                 // Đang quay đầu làm mất mặt -> tính là mất tập trung
                 if (firstDistractedTime == 0) {
-                    firstDistractedTime = System.currentTimeMillis();
+                    firstDistractedTime = currentTimeMs;
                 }
-                long distractedDuration = System.currentTimeMillis() - firstDistractedTime;
+                long distractedDuration = currentTimeMs - firstDistractedTime;
                 if (distractedDuration >= DISTRACTION_TIME_THRESHOLD_MS) {
-                    lastDistractedTime = System.currentTimeMillis();
+                    lastDistractedTime = currentTimeMs;
                 }
                 result.distractedDurationMs = distractedDuration;
                 result.isDistracted = (distractedDuration >= DISTRACTION_TIME_THRESHOLD_MS)
-                        || (lastDistractedTime > 0 && (System.currentTimeMillis() - lastDistractedTime < ALERT_PERSISTENCE_MS));
+                        || (lastDistractedTime > 0
+                                && (currentTimeMs - lastDistractedTime < ALERT_PERSISTENCE_MS));
             } else {
                 firstDistractedTime = 0;
             }
 
             if (firstFaceMissingTime == 0) {
-                firstFaceMissingTime = System.currentTimeMillis();
+                firstFaceMissingTime = currentTimeMs;
             }
-            long missingDuration = System.currentTimeMillis() - firstFaceMissingTime;
+            long missingDuration = currentTimeMs - firstFaceMissingTime;
             if (missingDuration >= FACE_MISSING_TIME_THRESHOLD_MS) {
                 result.isFaceMissing = true;
-                lastKnownYaw = 0f; // Reset góc quay cũ để tránh kẹt mãi ở trạng thái mất tập trung
+                lastKnownYaw = 0f;
                 firstDistractedTime = 0;
                 lastDistractedTime = 0;
-                tfliteDetector.resetTracker();
             }
-            result.isDrowsy = isDrowsyActive
-                    || (lastDrowsyTime > 0 && (System.currentTimeMillis() - lastDrowsyTime < ALERT_PERSISTENCE_MS));
         }
     }
 
-    private float calcEar(List<PointF> pts) {
-        if (pts == null || pts.size() < 16) {
+    // -------------------------------------------------------------------------
+    // Công thức tính EAR & MAR chuẩn MediaPipe 3D khớp 100% Colab (trichXuat.ipynb)
+    // -------------------------------------------------------------------------
+    private static float dist3D(NormalizedLandmark p1, NormalizedLandmark p2) {
+        float dx = p1.x() - p2.x();
+        float dy = p1.y() - p2.y();
+        float dz = p1.z() - p2.z();
+        return (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    private static float computeEar(List<NormalizedLandmark> lm, int[] corners, int[] vert1, int[] vert2) {
+        NormalizedLandmark pC1 = lm.get(corners[0]);
+        NormalizedLandmark pC2 = lm.get(corners[1]);
+        NormalizedLandmark pV1Top = lm.get(vert1[0]);
+        NormalizedLandmark pV1Bot = lm.get(vert1[1]);
+        NormalizedLandmark pV2Top = lm.get(vert2[0]);
+        NormalizedLandmark pV2Bot = lm.get(vert2[1]);
+
+        float dHoriz = dist3D(pC1, pC2);
+        if (dHoriz < 1e-6f) {
             return 0.0f;
         }
+        return (dist3D(pV1Top, pV1Bot) + dist3D(pV2Top, pV2Bot)) / (2.0f * dHoriz);
+    }
 
-        PointF p0 = pts.get(0);
-        PointF p8 = pts.get(8);
-        PointF p3 = pts.get(3);
-        PointF p13 = pts.get(13);
-        PointF p5 = pts.get(5);
-        PointF p11 = pts.get(11);
+    private static float computeMar(List<NormalizedLandmark> lm) {
+        NormalizedLandmark pC1 = lm.get(MOUTH_CORNERS[0]);
+        NormalizedLandmark pC2 = lm.get(MOUTH_CORNERS[1]);
+        NormalizedLandmark pTop = lm.get(MOUTH_LIPS[0]);
+        NormalizedLandmark pBot = lm.get(MOUTH_LIPS[1]);
 
-        float horizontalDist = dist(p0, p8);
-        if (horizontalDist <= 0.0001f) {
+        float dHoriz = dist3D(pC1, pC2);
+        if (dHoriz < 1e-6f) {
             return 0.0f;
         }
-
-        float verticalDist1 = dist(p3, p13);
-        float verticalDist2 = dist(p5, p11);
-
-        return (verticalDist1 + verticalDist2) / (2.0f * horizontalDist);
-    }
-
-    private float calcMar(List<PointF> upperLipBottom, List<PointF> lowerLipTop) {
-        PointF cornerLeft = upperLipBottom.get(0);
-        PointF cornerRight = upperLipBottom.get(8);
-        float horizontalDist = dist(cornerLeft, cornerRight);
-
-        if (horizontalDist > 0.0001f) {
-            float h1 = dist(upperLipBottom.get(2), lowerLipTop.get(2));
-            float h2 = dist(upperLipBottom.get(4), lowerLipTop.get(4));
-            float h3 = dist(upperLipBottom.get(6), lowerLipTop.get(6));
-            return (h1 + h2 + h3) / (2.0f * horizontalDist);
-        }
-        return 0.0f;
-    }
-
-    private float calcMarFallback(List<PointF> upper, List<PointF> lower) {
-        if (upper.size() < 3 || lower.size() < 3)
-            return 0f;
-        int uMid = upper.size() / 2;
-        int lMid = lower.size() / 2;
-        float vertical = dist(upper.get(uMid), lower.get(lMid));
-        float horizontal = dist(upper.get(0), upper.get(upper.size() - 1));
-        return (horizontal > 0.0001f) ? (vertical / horizontal) : 0f;
-    }
-
-    private float dist(PointF p1, PointF p2) {
-        float dx = p1.x - p2.x;
-        float dy = p1.y - p2.y;
-        return (float) Math.hypot(dx, dy);
-    }
-
-    private Bitmap cropDriverRegion(Bitmap bitmap) {
-        if (DRIVER_REGION_FRACTION >= 1.0f) {
-            return bitmap;
-        }
-        int cropW = (int) (bitmap.getWidth() * DRIVER_REGION_FRACTION);
-        cropW = Math.max(1, cropW);
-        return Bitmap.createBitmap(bitmap, 0, 0, cropW, bitmap.getHeight());
-    }
-
-    private RectF mapBboxToFullFrame(RectF bboxInCrop) {
-        if (bboxInCrop == null)
-            return null;
-        if (DRIVER_REGION_FRACTION >= 1.0f) {
-            return bboxInCrop;
-        }
-        return new RectF(
-                bboxInCrop.left * DRIVER_REGION_FRACTION,
-                bboxInCrop.top,
-                bboxInCrop.right * DRIVER_REGION_FRACTION,
-                bboxInCrop.bottom);
-    }
-
-    private Bitmap cropFace(Bitmap bitmap, RectF bbox) {
-        int imgW = bitmap.getWidth();
-        int imgH = bitmap.getHeight();
-        float padX = (bbox.right - bbox.left) * FACE_CROP_PADDING_X;
-
-        int x1 = (int) Math.max(0, (bbox.left - padX) * imgW);
-        int y1 = (int) Math.max(0, bbox.top * imgH);
-        int x2 = (int) Math.min(imgW, (bbox.right + padX) * imgW);
-        int y2 = (int) Math.min(imgH, bbox.bottom * imgH);
-
-        int cropW = x2 - x1;
-        int cropH = y2 - y1;
-
-        if (cropW <= 0 || cropH <= 0)
-            return bitmap;
-        return Bitmap.createBitmap(bitmap, x1, y1, cropW, cropH);
-    }
-
-    public TFLiteFaceDetector getTfliteDetector() {
-        return tfliteDetector;
-    }
-
-    public void resetTracker() {
-        lastTrackedFaceBbox = null;
-        consecutiveTrackFrames = 0;
-        if (tfliteDetector != null) {
-            tfliteDetector.resetTracker();
-        }
+        return dist3D(pTop, pBot) / dHoriz;
     }
 
     public void close() {
         if (lstmInterpreter != null) {
             lstmInterpreter.close();
         }
-        if (tfliteDetector != null) {
-            tfliteDetector.close();
-        }
-        if (mlkitDetector != null) {
-            mlkitDetector.close();
+        if (faceLandmarker != null) {
+            faceLandmarker.close();
         }
     }
 }

@@ -34,9 +34,11 @@ public class UiManager {
     public final ImageButton btnSwitchCamera;
     public final LinearLayout startOverlay;
     public final Button btnStartTrip;
+    private final AlertSoundManager alertSoundManager;
 
     public UiManager(Activity activity) {
         this.activity = activity;
+        this.alertSoundManager = new AlertSoundManager();
 
         cameraPreview = activity.findViewById(R.id.camera_preview);
         bboxOverlay = activity.findViewById(R.id.bbox_overlay);
@@ -85,6 +87,7 @@ public class UiManager {
             statusText.setText("CẢNH BÁO - KHÔNG THẤY TÀI XẾ!");
             statusText.setTextColor(Color.RED);
             confidenceText.setText("Hệ thống mất dấu người lái!");
+            alertSoundManager.startAlert();
         } else if (dResult.isDistracted) {
             // Ưu tiên cảnh báo mất tập trung khi tài xế quay đầu
             redFlashOverlay.setVisibility(View.VISIBLE);
@@ -92,6 +95,7 @@ public class UiManager {
             statusText.setText("CẢNH BÁO - MẤT TẬP TRUNG!");
             statusText.setTextColor(Color.RED);
             confidenceText.setText(String.format("Hãy nhìn thẳng! (Góc quay: %.0f°)", dResult.headEulerY));
+            alertSoundManager.startAlert();
         } else if (dResult.isDrowsy) {
             // Cảnh báo buồn ngủ khi tài xế nhìn thẳng nhưng sụp mí
             redFlashOverlay.setVisibility(View.VISIBLE);
@@ -100,8 +104,10 @@ public class UiManager {
             statusText.setTextColor(Color.RED);
             confidenceText.setText(String.format("Hãy dừng xe! (AI: %.0f%% | EAR: %.2f)",
                     dResult.drowsinessScore * 100f, dResult.ear));
+            alertSoundManager.startAlert();
         } else {
             redFlashOverlay.setVisibility(View.GONE);
+            alertSoundManager.stopAlert();
 
             if (dResult.faceDetected && dResult.isYawning) {
                 statusIcon.setText("🥱");
@@ -131,6 +137,18 @@ public class UiManager {
                     confidenceText.setText("");
                 }
             }
+        }
+    }
+
+    public void stopAlertSound() {
+        if (alertSoundManager != null) {
+            alertSoundManager.stopAlert();
+        }
+    }
+
+    public void release() {
+        if (alertSoundManager != null) {
+            alertSoundManager.release();
         }
     }
 }

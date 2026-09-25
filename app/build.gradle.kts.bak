@@ -34,9 +34,9 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
 
-    // Không nén file .tflite và .task để load nhanh hơn
+    // Không nén file .tflite để load nhanh hơn
     androidResources {
-        noCompress += listOf("tflite", "task")
+        noCompress += "tflite"
     }
 
     // Fix lỗi 16KB ELF alignment: không nén file .so để giữ nguyên alignment
@@ -70,7 +70,6 @@ dependencies {
     // ML Kit Face Detection - thay thế MediaPipe
     // Dùng Google Play Services: không bundle .so vào APK → không bao giờ lỗi 16KB
     implementation(libs.mlkit.face.detection)
-    implementation("com.google.mediapipe:tasks-vision:0.10.14")
     implementation(libs.mlkit.pose.detection)
 
     // Location API

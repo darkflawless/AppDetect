@@ -32,8 +32,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * DriverMonitorActivity - Màn hình chính giám sát buồng lái (Presenter / Controller):
- * Đạt chuẩn Đơn Trách Nhiệm (SRP): Chỉ quản lý vòng đời Activity và điều phối giao tiếp giữa các module:
+ * DriverMonitorActivity - Màn hình chính giám sát buồng lái (Presenter /
+ * Controller):
+ * Đạt chuẩn Đơn Trách Nhiệm (SRP): Chỉ quản lý vòng đời Activity và điều phối
+ * giao tiếp giữa các module:
  * - CameraManager (Thu nhận hình ảnh)
  * - DetectionPipeline (Bộ máy AI on-device)
  * - UdpFrameSender & AppWebSocketClient (Mạng truyền dẫn)
@@ -121,14 +123,16 @@ public class DriverMonitorActivity extends AppCompatActivity {
     }
 
     private void checkAndStartServices() {
-        boolean hasCamera = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
-        boolean hasLocation = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+        boolean hasCamera = ContextCompat.checkSelfPermission(this,
+                Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
+        boolean hasLocation = ContextCompat.checkSelfPermission(this,
+                Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
 
         if (hasCamera && hasLocation) {
             startCameraStream();
             LocationTrackingService.start(this);
         } else {
-            permissionsLauncher.launch(new String[]{
+            permissionsLauncher.launch(new String[] {
                     Manifest.permission.CAMERA,
                     Manifest.permission.ACCESS_FINE_LOCATION,
                     Manifest.permission.ACCESS_COARSE_LOCATION
@@ -161,7 +165,8 @@ public class DriverMonitorActivity extends AppCompatActivity {
     /**
      * Kiểm tra kết quả AI và gửi cảnh báo WebSocket + POST /violations (Multipart)
      */
-    private void checkAndSendAlerts(Bitmap currentFrame, List<SeatBeltDetector.Detection> detections, DrowsinessDetector.DrowsinessResult dResult) {
+    private void checkAndSendAlerts(Bitmap currentFrame, List<SeatBeltDetector.Detection> detections,
+            DrowsinessDetector.DrowsinessResult dResult) {
         long now = System.currentTimeMillis();
 
         // 1. Cảnh báo buồn ngủ
@@ -169,15 +174,16 @@ public class DriverMonitorActivity extends AppCompatActivity {
             if (now - lastDrowsyAlertTime > ALERT_COOLDOWN_MS) {
                 lastDrowsyAlertTime = now;
                 if (wsClient != null) {
-                    wsClient.sendRealtimeAlert(AppConfig.DEFAULT_DRIVER_ID, "DROWSY", "Tài xế có dấu hiệu ngủ gật (nhắm mắt > 3s)!");
+                    wsClient.sendRealtimeAlert(AppConfig.DEFAULT_DRIVER_ID, "DROWSY",
+                            "Tài xế có dấu hiệu ngủ gật (nhắm mắt > 3s)!");
                 }
-                AppRestClient.getInstance().sendViolation(AppConfig.DEFAULT_DRIVER_ID, "DROWSY", currentFrame, 0.0, 0.0, null);
+                AppRestClient.getInstance().sendViolation(AppConfig.DEFAULT_DRIVER_ID, "DROWSY", currentFrame, 0.0, 0.0,
+                        null);
                 SomnolenceRecordDto somnolenceDto = new SomnolenceRecordDto(
                         AppConfig.DEFAULT_DRIVER_ID,
                         dResult.ear,
                         dResult.mar,
-                        dResult.closedEyeDurationMs
-                );
+                        dResult.closedEyeDurationMs);
                 AppRestClient.getInstance().sendSomnolenceRecord(somnolenceDto, null);
             }
         }
@@ -187,9 +193,11 @@ public class DriverMonitorActivity extends AppCompatActivity {
             if (now - lastDistractedAlertTime > ALERT_COOLDOWN_MS) {
                 lastDistractedAlertTime = now;
                 if (wsClient != null) {
-                    wsClient.sendRealtimeAlert(AppConfig.DEFAULT_DRIVER_ID, "DISTRACTED", "Tài xế quay đầu mất tập trung!");
+                    wsClient.sendRealtimeAlert(AppConfig.DEFAULT_DRIVER_ID, "DISTRACTED",
+                            "Tài xế quay đầu mất tập trung!");
                 }
-                AppRestClient.getInstance().sendViolation(AppConfig.DEFAULT_DRIVER_ID, "DISTRACTED", currentFrame, 0.0, 0.0, null);
+                AppRestClient.getInstance().sendViolation(AppConfig.DEFAULT_DRIVER_ID, "DISTRACTED", currentFrame, 0.0,
+                        0.0, null);
             }
         }
 
@@ -200,9 +208,11 @@ public class DriverMonitorActivity extends AppCompatActivity {
                     if (now - lastSeatbeltAlertTime > ALERT_COOLDOWN_MS) {
                         lastSeatbeltAlertTime = now;
                         if (wsClient != null) {
-                            wsClient.sendRealtimeAlert(AppConfig.DEFAULT_DRIVER_ID, "NO_SEATBELT", "Phát hiện tài xế không cài dây an toàn!");
+                            wsClient.sendRealtimeAlert(AppConfig.DEFAULT_DRIVER_ID, "NO_SEATBELT",
+                                    "Phát hiện tài xế không cài dây an toàn!");
                         }
-                        AppRestClient.getInstance().sendViolation(AppConfig.DEFAULT_DRIVER_ID, "NO_SEATBELT", currentFrame, 0.0, 0.0, null);
+                        AppRestClient.getInstance().sendViolation(AppConfig.DEFAULT_DRIVER_ID, "NO_SEATBELT",
+                                currentFrame, 0.0, 0.0, null);
                     }
                     break;
                 }
@@ -212,29 +222,31 @@ public class DriverMonitorActivity extends AppCompatActivity {
 
     private void initNetworkStreaming() {
         udpSender = new UdpFrameSender(AppConfig.SERVER_IP, AppConfig.UDP_PORT, AppConfig.DEFAULT_DRIVER_ID);
-        wsClient = new AppWebSocketClient(AppConfig.SERVER_IP, AppConfig.DEFAULT_DRIVER_ID, new AppWebSocketClient.StreamCommandListener() {
-            @Override
-            public void onStartStream() {
-                udpSender.startStreaming();
-                Log.i(TAG, "✅ START_STREAM từ Backend");
-            }
+        wsClient = new AppWebSocketClient(AppConfig.SERVER_IP, AppConfig.DEFAULT_DRIVER_ID,
+                new AppWebSocketClient.StreamCommandListener() {
+                    @Override
+                    public void onStartStream() {
+                        udpSender.startStreaming();
+                        Log.i(TAG, "✅ START_STREAM từ Backend");
+                    }
 
-            @Override
-            public void onStopStream() {
-                udpSender.stopStreaming();
-                Log.i(TAG, "⏹ STOP_STREAM từ Backend");
-            }
+                    @Override
+                    public void onStopStream() {
+                        udpSender.stopStreaming();
+                        Log.i(TAG, "⏹ STOP_STREAM từ Backend");
+                    }
 
-            @Override
-            public void onConnected() {
-                runOnUiThread(() -> Toast.makeText(DriverMonitorActivity.this, "Đã kết nối Backend", Toast.LENGTH_SHORT).show());
-            }
+                    @Override
+                    public void onConnected() {
+                        runOnUiThread(() -> Toast
+                                .makeText(DriverMonitorActivity.this, "Đã kết nối Backend", Toast.LENGTH_SHORT).show());
+                    }
 
-            @Override
-            public void onDisconnected() {
-                Log.w(TAG, "Mất kết nối Backend");
-            }
-        });
+                    @Override
+                    public void onDisconnected() {
+                        Log.w(TAG, "Mất kết nối Backend");
+                    }
+                });
         wsClient.connect();
     }
 
@@ -244,7 +256,8 @@ public class DriverMonitorActivity extends AppCompatActivity {
             String line;
             while ((line = reader.readLine()) != null) {
                 line = line.trim();
-                if (!line.isEmpty()) labelList.add(line);
+                if (!line.isEmpty())
+                    labelList.add(line);
             }
         } catch (IOException e) {
             Log.e(TAG, "Error loading labels", e);
@@ -253,12 +266,26 @@ public class DriverMonitorActivity extends AppCompatActivity {
     }
 
     @Override
+    protected void onPause() {
+        super.onPause();
+        if (uiManager != null) {
+            uiManager.stopAlertSound();
+        }
+    }
+
+    @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (cameraManager != null) cameraManager.stopCamera();
-        if (detectionPipeline != null) detectionPipeline.close();
-        if (wsClient != null) wsClient.disconnect();
-        if (udpSender != null) udpSender.close();
+        if (uiManager != null)
+            uiManager.release();
+        if (cameraManager != null)
+            cameraManager.stopCamera();
+        if (detectionPipeline != null)
+            detectionPipeline.close();
+        if (wsClient != null)
+            wsClient.disconnect();
+        if (udpSender != null)
+            udpSender.close();
         LocationTrackingService.stop(this);
     }
 }

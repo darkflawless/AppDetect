@@ -16,7 +16,7 @@ import java.util.concurrent.Future;
 /**
  * DetectionPipeline - Quản lý các mô hình AI và luồng xử lý bất đồng bộ.
  * (Hiện tại đã tạm comment luồng Seatbelt & Person để giải phóng 100% CPU/RAM
- *  cho mô hình nhận diện Buồn ngủ Drowsiness đạt FPS cao nhất).
+ * cho mô hình nhận diện Buồn ngủ Drowsiness đạt FPS cao nhất).
  */
 public class DetectionPipeline {
 
@@ -104,72 +104,76 @@ public class DetectionPipeline {
         }
 
         /*
-        // ---------------------------------------------------------------------
-        // TẠM COMMENT LUỒNG PERSON DETECTION ĐỂ TẬP TRUNG TỐI ĐA CHO BUỒN NGỦ
-        // ---------------------------------------------------------------------
-        if (pendingPersonFuture != null && pendingPersonFuture.isDone()) {
-            try {
-                lastPersonBboxes = new ArrayList<>(pendingPersonFuture.get());
-            } catch (Exception e) {
-                Log.w(TAG, "Person result error: " + e.getMessage());
-            }
-            pendingPersonFuture = null;
-        }
-
-        if (personDetector != null && pendingPersonFuture == null) {
-            final Bitmap personBitmap = bitmap.copy(bitmap.getConfig(), false);
-            pendingPersonFuture = personExecutor.submit(() -> {
-                List<RectF> persons = personDetector.detectPersons(personBitmap);
-                personBitmap.recycle();
-                return persons;
-            });
-        }
-        */
+         * // ---------------------------------------------------------------------
+         * // TẠM COMMENT LUỒNG PERSON DETECTION ĐỂ TẬP TRUNG TỐI ĐA CHO BUỒN NGỦ
+         * // ---------------------------------------------------------------------
+         * if (pendingPersonFuture != null && pendingPersonFuture.isDone()) {
+         * try {
+         * lastPersonBboxes = new ArrayList<>(pendingPersonFuture.get());
+         * } catch (Exception e) {
+         * Log.w(TAG, "Person result error: " + e.getMessage());
+         * }
+         * pendingPersonFuture = null;
+         * }
+         * 
+         * if (personDetector != null && pendingPersonFuture == null) {
+         * final Bitmap personBitmap = bitmap.copy(bitmap.getConfig(), false);
+         * pendingPersonFuture = personExecutor.submit(() -> {
+         * List<RectF> persons = personDetector.detectPersons(personBitmap);
+         * personBitmap.recycle();
+         * return persons;
+         * });
+         * }
+         */
 
         /*
-        // ---------------------------------------------------------------------
-        // TẠM COMMENT LUỒNG SEATBELT DETECTION ĐỂ GIẢM TẢI CPU/RAM
-        // ---------------------------------------------------------------------
-        if (pendingSeatbeltFuture != null && pendingSeatbeltFuture.isDone()) {
-            try {
-                lastSeatbeltDetections = new ArrayList<>(pendingSeatbeltFuture.get());
-            } catch (Exception e) {
-                Log.w(TAG, "YOLO result error: " + e.getMessage());
-            }
-            pendingSeatbeltFuture = null;
-        }
-
-        if (seatbeltDetector != null && pendingSeatbeltFuture == null && !lastPersonBboxes.isEmpty()) {
-            final Bitmap fullBitmap = bitmap.copy(bitmap.getConfig(), false);
-            final List<RectF> persons = new ArrayList<>(lastPersonBboxes);
-
-            pendingSeatbeltFuture = seatbeltExecutor.submit(() -> {
-                List<SeatBeltDetector.Detection> allSb = new ArrayList<>();
-                int pIdx = 1;
-                for (RectF pBbox : persons) {
-                    ImageUtils.CropResult crop = ImageUtils.cropPersonWithMargin(fullBitmap, pBbox, 0.08f);
-                    if (crop == null) continue;
-
-                    List<SeatBeltDetector.Detection> sbOnCrop = seatbeltDetector.detect(crop.cropBitmap);
-                    crop.cropBitmap.recycle();
-
-                    for (SeatBeltDetector.Detection d : sbOnCrop) {
-                        float gL = crop.cropL + d.bbox.left * crop.getNormW();
-                        float gT = crop.cropT + d.bbox.top * crop.getNormH();
-                        float gR = crop.cropL + d.bbox.right * crop.getNormW();
-                        float gB = crop.cropT + d.bbox.bottom * crop.getNormH();
-                        allSb.add(new SeatBeltDetector.Detection(
-                                new RectF(gL, gT, gR, gB),
-                                d.classId, d.confidence, d.label));
-                    }
-                    allSb.add(new SeatBeltDetector.Detection(new RectF(pBbox), -2, 1.0f, "P" + pIdx));
-                    pIdx++;
-                }
-                fullBitmap.recycle();
-                return allSb;
-            });
-        }
-        */
+         * // ---------------------------------------------------------------------
+         * // TẠM COMMENT LUỒNG SEATBELT DETECTION ĐỂ GIẢM TẢI CPU/RAM
+         * // ---------------------------------------------------------------------
+         * if (pendingSeatbeltFuture != null && pendingSeatbeltFuture.isDone()) {
+         * try {
+         * lastSeatbeltDetections = new ArrayList<>(pendingSeatbeltFuture.get());
+         * } catch (Exception e) {
+         * Log.w(TAG, "YOLO result error: " + e.getMessage());
+         * }
+         * pendingSeatbeltFuture = null;
+         * }
+         * 
+         * if (seatbeltDetector != null && pendingSeatbeltFuture == null &&
+         * !lastPersonBboxes.isEmpty()) {
+         * final Bitmap fullBitmap = bitmap.copy(bitmap.getConfig(), false);
+         * final List<RectF> persons = new ArrayList<>(lastPersonBboxes);
+         * 
+         * pendingSeatbeltFuture = seatbeltExecutor.submit(() -> {
+         * List<SeatBeltDetector.Detection> allSb = new ArrayList<>();
+         * int pIdx = 1;
+         * for (RectF pBbox : persons) {
+         * ImageUtils.CropResult crop = ImageUtils.cropPersonWithMargin(fullBitmap,
+         * pBbox, 0.08f);
+         * if (crop == null) continue;
+         * 
+         * List<SeatBeltDetector.Detection> sbOnCrop =
+         * seatbeltDetector.detect(crop.cropBitmap);
+         * crop.cropBitmap.recycle();
+         * 
+         * for (SeatBeltDetector.Detection d : sbOnCrop) {
+         * float gL = crop.cropL + d.bbox.left * crop.getNormW();
+         * float gT = crop.cropT + d.bbox.top * crop.getNormH();
+         * float gR = crop.cropL + d.bbox.right * crop.getNormW();
+         * float gB = crop.cropT + d.bbox.bottom * crop.getNormH();
+         * allSb.add(new SeatBeltDetector.Detection(
+         * new RectF(gL, gT, gR, gB),
+         * d.classId, d.confidence, d.label));
+         * }
+         * allSb.add(new SeatBeltDetector.Detection(new RectF(pBbox), -2, 1.0f, "P" +
+         * pIdx));
+         * pIdx++;
+         * }
+         * fullBitmap.recycle();
+         * return allSb;
+         * });
+         * }
+         */
 
         // ---------------------------------------------------------------------
         // LUỒNG DUY NHẤT ĐƯỢC CHẠY: NHẬN DIỆN BUỒN NGỦ (DROWSINESS)
