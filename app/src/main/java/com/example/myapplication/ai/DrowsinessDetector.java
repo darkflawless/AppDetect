@@ -49,12 +49,7 @@ public class DrowsinessDetector {
     // Cấu hình Cửa sổ trượt LSTM: 15 frame liên tiếp (Khớp 100% Colab)
     public static final int WINDOW_SIZE = 15;
     public static final int NUM_FEATURES = 6; // [EAR_Left, EAR_Right, MAR, pitch, yaw, roll]
-    public static final float DROWSINESS_THRESHOLD = 0.40f; // Ngưỡng nhận diện nhạy và chuẩn xác (40%)
-
-    // Ngưỡng khép chặt mí mắt (Dành riêng cho trạng thái ngủ nhắm nghiền mắt)
-    // Khi mí mắt khép chặt vào nhau, EAR luôn tụt sâu xuống dưới 0.17 ở mọi dáng
-    // mắt.
-    public static final float EYES_CLOSED_EAR_THRESHOLD = 0.15f;
+    public static final float DROWSINESS_THRESHOLD = 0.40f; // Ngưỡng phân loại đầu ra của mô hình AI (>= 40%)
 
     // Các ngưỡng bổ trợ cảnh báo an toàn
     public static final float MAR_THRESHOLD = 0.65f; // Ngưỡng phát hiện ngáp
@@ -374,14 +369,8 @@ public class DrowsinessDetector {
             result.isDistracted = (currentDistractedDuration >= DISTRACTION_TIME_THRESHOLD_MS)
                     || (lastDistractedTime > 0 && (currentTimeMs - lastDistractedTime < ALERT_PERSISTENCE_MS));
 
-            // Bước 9: Quyết định trạng thái buồn ngủ thông minh & Giữ cảnh báo liên tục khi
-            // vẫn nhắm mắt
-            boolean isLstmDrowsy = (result.drowsinessScore >= DROWSINESS_THRESHOLD) && !isDistractedTurn;
-            boolean isEyesPhysicallyClosed = (result.ear < EYES_CLOSED_EAR_THRESHOLD) && !isDistractedTurn;
-
-            // Đang có biểu hiện buồn ngủ: Hoặc do AI phát hiện, hoặc do mắt vẫn đang khép
-            // chặt khi đang trong đợt cảnh báo
-            boolean isCurrentlyDrowsy = isLstmDrowsy || (isDrowsyActive && isEyesPhysicallyClosed);
+            // Bước 9: Quyết định trạng thái buồn ngủ 100% bằng mô hình AI BiLSTM
+            boolean isCurrentlyDrowsy = (result.drowsinessScore >= DROWSINESS_THRESHOLD) && !isDistractedTurn;
 
             if (isCurrentlyDrowsy) {
                 isDrowsyActive = true;
