@@ -42,17 +42,19 @@ public class DrowsinessDetector {
     private static final String TAG = "DrowsinessDetector";
 
     // Tên file model và scaler trong thư mục assets
-    private static final String LSTM_MODEL_FP16 = "drowsiness_detector_fp16.tflite";
+    private static final String LSTM_MODEL_NAME = "drowsiness.tflite";
     private static final String SCALER_PARAMS_FILE = "scaler_params.json";
     private static final String FACE_LANDMARKER_MODEL = "face_landmarker.task";
 
     // Cấu hình Cửa sổ trượt LSTM: 15 frame liên tiếp (Khớp 100% Colab)
     public static final int WINDOW_SIZE = 15;
     public static final int NUM_FEATURES = 6; // [EAR_Left, EAR_Right, MAR, pitch, yaw, roll]
-    public static final float DROWSINESS_THRESHOLD = 0.40f; // Ngưỡng phân loại đầu ra của mô hình AI (>= 40%)
+    public static final float DROWSINESS_THRESHOLD = 0.58f; // Ngưỡng phân loại đầu ra tối ưu của mô hình AI (P >= 58%)
 
     // Các ngưỡng bổ trợ cảnh báo an toàn
     public static final float MAR_THRESHOLD = 0.65f; // Ngưỡng phát hiện ngáp
+    public static final long DROWSY_TIME_THRESHOLD_MS = 1000L; // Nhắm mắt liên tục 1.0 giây = kích hoạt báo động buồn
+                                                               // ngủ
     public static final float DISTRACTION_YAW_THRESHOLD = 35.0f; // Góc quay đầu > 35 độ (chuẩn ADAS)
     public static final float HEAD_CENTER_YAW_THRESHOLD = 18.0f; // Vùng an toàn nhìn thẳng (Hysteresis)
     public static final int CENTER_HEAD_FRAMES_TO_CLEAR = 3; // 3 frame liên tiếp nhìn thẳng để tắt đỏ ngay
@@ -63,18 +65,24 @@ public class DrowsinessDetector {
     // Padding cho Bounding Box hiển thị UI
     private static final float FACE_CROP_PADDING_X = 0.15f;
 
-    // Các chỉ số Landmark chuẩn từ MediaPipe (Khớp 100% với file trichXuat.ipynb
-    // lúc train)
-    private static final int[] LEFT_EYE_CORNERS = { 33, 133 };
-    private static final int[] LEFT_EYE_VERT1 = { 160, 144 };
-    private static final int[] LEFT_EYE_VERT2 = { 158, 153 };
+    // Các chỉ số Landmark chuẩn từ MediaPipe (Khớp 100% với Colab huấn luyện
+    // Untitled0.ipynb)
+    // Mắt TRÁI trong Colab (FACEMESH_LEFT_EYE: p[8]=362, p[0]=263; dọc: 385-374,
+    // 387-373)
+    private static final int[] LEFT_EYE_CORNERS = { 362, 263 };
+    private static final int[] LEFT_EYE_VERT1 = { 385, 374 };
+    private static final int[] LEFT_EYE_VERT2 = { 387, 373 };
 
-    private static final int[] RIGHT_EYE_CORNERS = { 362, 263 };
-    private static final int[] RIGHT_EYE_VERT1 = { 385, 380 };
-    private static final int[] RIGHT_EYE_VERT2 = { 387, 373 };
+    // Mắt PHẢI trong Colab (FACEMESH_RIGHT_EYE: p[8]=133, p[0]=33; dọc: 158-145,
+    // 160-144)
+    private static final int[] RIGHT_EYE_CORNERS = { 133, 33 };
+    private static final int[] RIGHT_EYE_VERT1 = { 158, 145 };
+    private static final int[] RIGHT_EYE_VERT2 = { 160, 144 };
 
+    // Miệng (Khớp Colab: ngang: 61, 291; dọc 1: 0, 17; dọc 2: 40, 37)
     private static final int[] MOUTH_CORNERS = { 61, 291 };
-    private static final int[] MOUTH_LIPS = { 13, 14 };
+    private static final int[] MOUTH_VERT1 = { 0, 17 };
+    private static final int[] MOUTH_VERT2 = { 40, 37 };
 
     // Detectors
     private final FaceLandmarker faceLandmarker;
@@ -87,18 +95,17 @@ public class DrowsinessDetector {
 
     // Bộ tham số chuẩn hóa backup (Khớp 100% với scaler_params.json từ Colab)
     private final float[] scalerMean = new float[] {
-            0.30109289573440345f, 0.31031264726325436f, 0.13542384890804707f,
-            3.0011908976013073f, 14.141056761247397f, 2.122260188271392f
+            0.307537435f, 0.278689816f, 0.341796848f,
+            -2.520522891f, 5.144302506f, 1.085203904f
     };
     private final float[] scalerStd = new float[] {
-            0.10028701967373528f, 0.09783590447246555f, 0.2004178641198358f,
-            9.815895911316911f, 15.381944654242444f, 5.844676978018849f
+            0.119749760f, 0.080496364f, 0.120368254f,
+            10.880776095f, 12.965435966f, 5.604995941f
     };
 
     // Logging & Timers
     private long lastLogTimeMs = 0;
     private long firstDrowsyTime = 0;
-    private long lastDrowsyTime = 0;
     private long firstDistractedTime = 0;
     private long lastDistractedTime = 0;
     private long firstFaceMissingTime = 0;
@@ -162,8 +169,8 @@ public class DrowsinessDetector {
     }
 
     private MappedByteBuffer loadModelFile(Context context) throws IOException {
-        Log.i(TAG, "Đang nạp mô hình LSTM: " + LSTM_MODEL_FP16);
-        AssetFileDescriptor fileDescriptor = context.getAssets().openFd(LSTM_MODEL_FP16);
+        Log.i(TAG, "Đang nạp mô hình LSTM: " + LSTM_MODEL_NAME);
+        AssetFileDescriptor fileDescriptor = context.getAssets().openFd(LSTM_MODEL_NAME);
         try (FileInputStream inputStream = new FileInputStream(fileDescriptor.getFileDescriptor())) {
             FileChannel fileChannel = inputStream.getChannel();
             long startOffset = fileDescriptor.getStartOffset();
@@ -217,12 +224,9 @@ public class DrowsinessDetector {
                 pushToSequence(0f, 0f, 0f, 0f, 0f, 0f);
                 evaluateLstmDrowsiness(result);
 
-                // Kiểm tra duy trì cảnh báo nếu vừa mới kích hoạt trong vòng 1 giây
-                boolean withinAlertWindow = (lastDrowsyTime > 0
-                        && (currentTimeMs - lastDrowsyTime < ALERT_PERSISTENCE_MS));
-                result.isDrowsy = isDrowsyActive || withinAlertWindow;
+                // Duy trì trạng thái buồn ngủ nếu trước đó đã kích hoạt (gục đầu xuống)
+                result.isDrowsy = isDrowsyActive;
                 if (!result.isDrowsy) {
-                    isDrowsyActive = false;
                     firstDrowsyTime = 0;
                     result.closedEyeDurationMs = 0;
                 } else if (firstDrowsyTime > 0) {
@@ -283,7 +287,8 @@ public class DrowsinessDetector {
                     float[] mat = matrices.get(0);
                     // Ma trận 4x4 lưu theo thứ tự column-major trong flat array 16 phần tử:
                     // mat[0]=r00, mat[1]=r10, mat[2]=r20
-                    // mat[6]=r21, mat[10]=r22
+                    // mat[4]=r01, mat[5]=r11, mat[6]=r21
+                    // mat[8]=r02, mat[9]=r12, mat[10]=r22
                     float m00 = mat[0];
                     float m10 = mat[1];
                     float m20 = mat[2];
@@ -291,10 +296,16 @@ public class DrowsinessDetector {
                     float m22 = mat[10];
 
                     double sy = Math.sqrt(m00 * m00 + m10 * m10);
-                    if (sy > 1e-6) {
+                    if (sy >= 1e-6) {
                         pitch = (float) Math.toDegrees(Math.atan2(m21, m22));
                         yaw = (float) Math.toDegrees(Math.atan2(-m20, sy));
                         roll = (float) Math.toDegrees(Math.atan2(m10, m00));
+                    } else {
+                        float m11 = mat[5];
+                        float m12 = mat[9];
+                        pitch = (float) Math.toDegrees(Math.atan2(-m12, m11));
+                        yaw = (float) Math.toDegrees(Math.atan2(-m20, sy));
+                        roll = 0.0f;
                     }
                 }
             }
@@ -369,34 +380,33 @@ public class DrowsinessDetector {
             result.isDistracted = (currentDistractedDuration >= DISTRACTION_TIME_THRESHOLD_MS)
                     || (lastDistractedTime > 0 && (currentTimeMs - lastDistractedTime < ALERT_PERSISTENCE_MS));
 
-            // Bước 9: Quyết định trạng thái buồn ngủ 100% bằng mô hình AI BiLSTM
+            // Bước 9: Quyết định trạng thái buồn ngủ bằng mô hình AI BiLSTM kết hợp bộ đếm
+            // thời gian (1.0 giây)
+            // Đồng bộ 100% logic với AI-ThamKhao test_cam.py: Đủ 1.0s mới hú còi, mở mắt là
+            // tắt ngay tức thì
             boolean isCurrentlyDrowsy = (result.drowsinessScore >= DROWSINESS_THRESHOLD) && !isDistractedTurn;
 
             if (isCurrentlyDrowsy) {
-                isDrowsyActive = true;
-                lastDrowsyTime = currentTimeMs; // Liên tục gia hạn mốc thời gian -> Còi kêu liên tục, không bao giờ tắt
-                                                // khi vẫn nhắm
                 if (firstDrowsyTime == 0) {
                     firstDrowsyTime = currentTimeMs;
                 }
-                result.closedEyeDurationMs = currentTimeMs - firstDrowsyTime;
-            } else {
-                // Người lái KHÔNG còn biểu hiện buồn ngủ (mắt đã mở ra VÀ AI đã hạ điểm):
-                // Duy trì cảnh báo thêm 1.0 giây sau khi mở mắt để chống giật còi
-                if (lastDrowsyTime > 0 && (currentTimeMs - lastDrowsyTime < ALERT_PERSISTENCE_MS)) {
-                    if (firstDrowsyTime > 0) {
-                        result.closedEyeDurationMs = currentTimeMs - firstDrowsyTime;
-                    }
-                } else {
-                    // Đã qua 1.0 giây sau khi mở mắt tỉnh táo -> Chính thức tắt cảnh báo
-                    isDrowsyActive = false;
-                    firstDrowsyTime = 0;
-                    result.closedEyeDurationMs = 0;
+                long duration = currentTimeMs - firstDrowsyTime;
+                result.closedEyeDurationMs = duration;
+
+                // Chỉ khi buồn ngủ duy trì liên tục >= 1.0 giây mới kích hoạt cảnh báo (lọc bỏ
+                // chớp mắt tự nhiên)
+                if (duration >= DROWSY_TIME_THRESHOLD_MS) {
+                    isDrowsyActive = true;
                 }
+            } else {
+                // Người lái mở mắt: Tắt cảnh báo ngay lập tức, reset bộ đếm về 0 (khớp
+                // AI-ThamKhao test_cam.py)
+                firstDrowsyTime = 0;
+                isDrowsyActive = false;
+                result.closedEyeDurationMs = 0;
             }
 
-            result.isDrowsy = isDrowsyActive
-                    || (lastDrowsyTime > 0 && (currentTimeMs - lastDrowsyTime < ALERT_PERSISTENCE_MS));
+            result.isDrowsy = isDrowsyActive;
 
             // Log theo thời gian thực (0.5s / lần)
             if (currentTimeMs - lastLogTimeMs >= 500L) {
@@ -441,20 +451,15 @@ public class DrowsinessDetector {
 
     private void evaluateLstmDrowsiness(DrowsinessResult result) {
         synchronized (sequenceBuffer) {
-            if (sequenceBuffer.isEmpty()) {
+            // Khớp 100% Python test_cam.py (if len(frame_buffer) == SEQ_LEN):
+            // Chờ gom đủ 15 frame thực tế của camera (~0.45s đầu) mới bắt đầu chạy nhận
+            // diện AI
+            if (sequenceBuffer.size() < WINDOW_SIZE) {
                 result.drowsinessScore = 0f;
                 return;
             }
 
-            int size = sequenceBuffer.size();
-            int padCount = WINDOW_SIZE - size;
-
-            float[] firstItem = sequenceBuffer.peekFirst();
-            for (int i = 0; i < padCount; i++) {
-                System.arraycopy(firstItem, 0, lstmInputBuffer[0][i], 0, NUM_FEATURES);
-            }
-
-            int idx = padCount;
+            int idx = 0;
             for (float[] item : sequenceBuffer) {
                 System.arraycopy(item, 0, lstmInputBuffer[0][idx], 0, NUM_FEATURES);
                 idx++;
@@ -471,9 +476,7 @@ public class DrowsinessDetector {
         consecutiveCenterHeadFrames = 0;
 
         if (isDrowsyActive) {
-            // Đang trong trạng thái buồn ngủ mà mất mặt (gục đầu xuống) -> liên tục gia hạn
-            // cảnh báo
-            lastDrowsyTime = currentTimeMs;
+            // Đang trong trạng thái buồn ngủ mà mất mặt (gục đầu xuống)
             if (firstDrowsyTime == 0) {
                 firstDrowsyTime = currentTimeMs;
             }
@@ -511,13 +514,12 @@ public class DrowsinessDetector {
     }
 
     // -------------------------------------------------------------------------
-    // Công thức tính EAR & MAR chuẩn MediaPipe 3D khớp 100% Colab (trichXuat.ipynb)
+    // Công thức tính EAR & MAR chuẩn 2D khớp 100% Colab (Untitled0.ipynb)
     // -------------------------------------------------------------------------
-    private static float dist3D(NormalizedLandmark p1, NormalizedLandmark p2) {
+    private static float dist2D(NormalizedLandmark p1, NormalizedLandmark p2) {
         float dx = p1.x() - p2.x();
         float dy = p1.y() - p2.y();
-        float dz = p1.z() - p2.z();
-        return (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
+        return (float) Math.sqrt(dx * dx + dy * dy);
     }
 
     private static float computeEar(List<NormalizedLandmark> lm, int[] corners, int[] vert1, int[] vert2) {
@@ -528,24 +530,27 @@ public class DrowsinessDetector {
         NormalizedLandmark pV2Top = lm.get(vert2[0]);
         NormalizedLandmark pV2Bot = lm.get(vert2[1]);
 
-        float dHoriz = dist3D(pC1, pC2);
+        float dHoriz = dist2D(pC1, pC2);
         if (dHoriz < 1e-6f) {
             return 0.0f;
         }
-        return (dist3D(pV1Top, pV1Bot) + dist3D(pV2Top, pV2Bot)) / (2.0f * dHoriz);
+        return (dist2D(pV1Top, pV1Bot) + dist2D(pV2Top, pV2Bot)) / (2.0f * dHoriz);
     }
 
     private static float computeMar(List<NormalizedLandmark> lm) {
         NormalizedLandmark pC1 = lm.get(MOUTH_CORNERS[0]);
         NormalizedLandmark pC2 = lm.get(MOUTH_CORNERS[1]);
-        NormalizedLandmark pTop = lm.get(MOUTH_LIPS[0]);
-        NormalizedLandmark pBot = lm.get(MOUTH_LIPS[1]);
+        NormalizedLandmark pV1Top = lm.get(MOUTH_VERT1[0]);
+        NormalizedLandmark pV1Bot = lm.get(MOUTH_VERT1[1]);
+        NormalizedLandmark pV2Top = lm.get(MOUTH_VERT2[0]);
+        NormalizedLandmark pV2Bot = lm.get(MOUTH_VERT2[1]);
 
-        float dHoriz = dist3D(pC1, pC2);
-        if (dHoriz < 1e-6f) {
+        float mouthWidth = dist2D(pC1, pC2);
+        if (mouthWidth < 1e-6f) {
             return 0.0f;
         }
-        return dist3D(pTop, pBot) / dHoriz;
+        float mouthHeight = (dist2D(pV1Top, pV1Bot) + dist2D(pV2Top, pV2Bot)) / 2.0f;
+        return mouthHeight / mouthWidth;
     }
 
     public void close() {
