@@ -11,8 +11,8 @@ import android.widget.TextView;
 import androidx.camera.view.PreviewView;
 
 import com.example.myapplication.R;
+import com.example.myapplication.ai.Detection;
 import com.example.myapplication.ai.DrowsinessDetector;
-import com.example.myapplication.ai.SeatBeltDetector;
 
 import java.util.List;
 
@@ -63,22 +63,10 @@ public class UiManager {
         });
     }
 
-    public void updateUI(List<SeatBeltDetector.Detection> detections, DrowsinessDetector.DrowsinessResult dResult,
+    public void updateUI(List<Detection> detections, DrowsinessDetector.DrowsinessResult dResult,
                          float fps, int imgW, int imgH) {
         fpsText.setText(String.format("%.1f FPS", fps));
         bboxOverlay.setDetections(detections, imgW, imgH);
-
-        SeatBeltDetector.Detection bestBelt = null;
-        SeatBeltDetector.Detection bestNoBelt = null;
-        for (SeatBeltDetector.Detection d : detections) {
-            if (d.label.equalsIgnoreCase("seatbelt") || d.label.equalsIgnoreCase("belt")) {
-                if (bestBelt == null || d.confidence > bestBelt.confidence)
-                    bestBelt = d;
-            } else if (d.label.equalsIgnoreCase("no-seatbelt") || d.label.equalsIgnoreCase("no_belt")) {
-                if (bestNoBelt == null || d.confidence > bestNoBelt.confidence)
-                    bestNoBelt = d;
-            }
-        }
 
         // Logic hiển thị cảnh báo an toàn
         if (dResult.isFaceMissing && !dResult.isDrowsy) {
@@ -114,16 +102,6 @@ public class UiManager {
                 statusText.setText("CẢNH BÁO - Đang ngáp!");
                 statusText.setTextColor(Color.parseColor("#FF9100"));
                 confidenceText.setText("Bạn có vẻ đang mệt mỏi.");
-            } else if (bestNoBelt != null) {
-                statusIcon.setText("⚠️");
-                statusText.setText("CẢNH BÁO - Không đeo dây!");
-                statusText.setTextColor(Color.RED);
-                confidenceText.setText(String.format("Độ tin cậy: %.1f%%", bestNoBelt.confidence * 100f));
-            } else if (bestBelt != null) {
-                statusIcon.setText("✅");
-                statusText.setText("AN TOÀN - Đang đeo dây");
-                statusText.setTextColor(Color.GREEN);
-                confidenceText.setText(String.format("Độ tin cậy: %.1f%%", bestBelt.confidence * 100f));
             } else {
                 statusIcon.setText("😊");
                 statusText.setText(

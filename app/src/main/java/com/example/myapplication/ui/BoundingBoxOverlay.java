@@ -8,23 +8,21 @@ import android.graphics.RectF;
 import android.util.AttributeSet;
 import android.view.View;
 
-import com.example.myapplication.ai.SeatBeltDetector;
+import com.example.myapplication.ai.Detection;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /**
  * BoundingBoxOverlay - Custom View vẽ bounding box lên ảnh camera.
- *
- * - Màu xanh lá  (#00E676) cho "belt"   → AN TOÀN
- * - Màu đỏ       (#FF1744) cho "no-belt" → NGUY HIỂM
  */
 public class BoundingBoxOverlay extends View {
 
-    private static final int COLOR_BELT    = Color.parseColor("#00E676"); // Xanh lá sáng
-    private static final int COLOR_NO_BELT = Color.parseColor("#FF1744"); // Đỏ sáng
+    private static final int COLOR_ALERT = Color.parseColor("#FF1744"); // Đỏ sáng
+    private static final int COLOR_WARN  = Color.parseColor("#FF9100"); // Cam
+    private static final int COLOR_FACE  = Color.parseColor("#00E5FF"); // Cyan cho Face
 
-    private List<SeatBeltDetector.Detection> detections = new ArrayList<>();
+    private List<Detection> detections = new ArrayList<>();
 
     private final Paint boxPaint    = new Paint();
     private final Paint labelBgPaint = new Paint();
@@ -70,12 +68,12 @@ public class BoundingBoxOverlay extends View {
     /**
      * Gọi từ Main Thread (hoặc postInvalidate) khi có detection mới.
      */
-    public void setDetections(List<SeatBeltDetector.Detection> newDetections) {
+    public void setDetections(List<Detection> newDetections) {
         this.detections = new ArrayList<>(newDetections);
         postInvalidate(); // Yêu cầu vẽ lại trên UI thread
     }
 
-    public void setDetections(List<SeatBeltDetector.Detection> newDetections, int imgW, int imgH) {
+    public void setDetections(List<Detection> newDetections, int imgW, int imgH) {
         this.detections = new ArrayList<>(newDetections);
         this.imgW = imgW;
         this.imgH = imgH;
@@ -104,21 +102,17 @@ public class BoundingBoxOverlay extends View {
         float dx = (viewW - scaledW) / 2f;
         float dy = (viewH - scaledH) / 2f;
 
-        for (SeatBeltDetector.Detection det : detections) {
+        for (Detection det : detections) {
             String lower = det.label.toLowerCase();
             int color;
             if (lower.startsWith("person") || lower.startsWith("p")) {
                 color = Color.parseColor("#FFD600"); // Vàng cho Person
-            } else if (lower.contains("belt") && !lower.contains("no")) {
-                color = COLOR_BELT; // Xanh lá sáng
-            } else if (lower.contains("no-belt") || lower.contains("no_belt")) {
-                color = COLOR_NO_BELT; // Đỏ sáng
             } else if (lower.contains("face")) {
-                color = Color.parseColor("#00E5FF"); // Cyan cho Face
+                color = COLOR_FACE; // Cyan cho Face
             } else if (lower.equals("yawning")) {
-                color = Color.parseColor("#FF9100"); // Cam
+                color = COLOR_WARN; // Cam
             } else {
-                color = COLOR_NO_BELT; // Đỏ (drowsy/distracted)
+                color = COLOR_ALERT; // Đỏ (drowsy/distracted)
             }
 
             boxPaint.setColor(color);
@@ -142,15 +136,14 @@ public class BoundingBoxOverlay extends View {
 
             // --- Vẽ label phía trên box ---
             String prefix = "";
-            if (lower.contains("belt") && !lower.contains("no")) prefix = "✓ ";
-            else if (lower.contains("no")) prefix = "✗ ";
-            else if (lower.equals("drowsy")) prefix = "😴 ";
+            if (lower.equals("drowsy")) prefix = "😴 ";
+            else if (lower.equals("distracted")) prefix = "👀 ";
             else if (lower.equals("yawning")) prefix = "🥱 ";
             else if (lower.contains("face")) prefix = "👤 ";
             else if (lower.startsWith("person")) prefix = "👤 ";
 
             String labelText = prefix + det.label.toUpperCase();
-            if (!lower.contains("face") && !lower.equals("drowsy") && !lower.equals("yawning") && !lower.startsWith("person")) {
+            if (!lower.contains("face") && !lower.equals("drowsy") && !lower.equals("distracted") && !lower.equals("yawning") && !lower.startsWith("person")) {
                 labelText += "  " + String.format("%.0f%%", det.confidence * 100f);
             }
 
@@ -186,15 +179,5 @@ public class BoundingBoxOverlay extends View {
         // Góc dưới-phải
         canvas.drawLine(r, b, r - len, b, paint);
         canvas.drawLine(r, b, r, b - len, paint);
-    }
-
-    /**
-     * Kiểm tra label có phải "có dây" không.
-     * Hỗ trợ cả "belt" lẫn "seatbelt".
-     */
-    private boolean isBeltClass(String label) {
-        if (label == null) return false;
-        String lower = label.toLowerCase();
-        return lower.equals("belt") || lower.equals("seatbelt");
     }
 }

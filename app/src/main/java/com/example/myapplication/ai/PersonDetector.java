@@ -27,9 +27,8 @@ import java.util.List;
 /**
  * PersonDetector — Dùng yolov8n (COCO-80) để detect toàn thân người.
  *
- * Pipeline mục tiêu:
+ * Pipeline:
  * full frame → PersonDetector → [person1_bbox, person2_bbox, ...]
- * → crop từng người → SeatBeltDetector (seatbelt) trên mỗi crop
  *
  * Output: List<RectF> — mỗi RectF là bbox người (normalized [0,1])
  *

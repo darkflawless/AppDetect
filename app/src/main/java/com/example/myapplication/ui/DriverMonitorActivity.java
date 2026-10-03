@@ -14,9 +14,9 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 
 import com.example.myapplication.R;
+import com.example.myapplication.ai.Detection;
 import com.example.myapplication.ai.DetectionPipeline;
 import com.example.myapplication.ai.DrowsinessDetector;
-import com.example.myapplication.ai.SeatBeltDetector;
 import com.example.myapplication.camera.CameraManager;
 import com.example.myapplication.data.model.SomnolenceRecordDto;
 import com.example.myapplication.network.api.AppRestClient;
@@ -25,10 +25,6 @@ import com.example.myapplication.network.websocket.AppWebSocketClient;
 import com.example.myapplication.service.LocationTrackingService;
 import com.example.myapplication.utils.AppConfig;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -55,7 +51,6 @@ public class DriverMonitorActivity extends AppCompatActivity {
 
     private boolean isTripStarted = false;
     private long lastDrowsyAlertTime = 0;
-    private long lastSeatbeltAlertTime = 0;
     private long lastDistractedAlertTime = 0;
     private static final long ALERT_COOLDOWN_MS = 10000L; // 10 giây giữa các lần bắn vi phạm
 
@@ -104,8 +99,7 @@ public class DriverMonitorActivity extends AppCompatActivity {
 
         // 3. Khởi tạo AI Detection Pipeline
         detectionPipeline = new DetectionPipeline();
-        String[] labels = loadLabels();
-        detectionPipeline.loadModelsAsync(this, labels, new DetectionPipeline.InitCallback() {
+        detectionPipeline.loadModelsAsync(this, new DetectionPipeline.InitCallback() {
             @Override
             public void onSuccess() {
                 uiManager.enableStartButton();
@@ -165,7 +159,7 @@ public class DriverMonitorActivity extends AppCompatActivity {
     /**
      * Kiểm tra kết quả AI và gửi cảnh báo WebSocket + POST /violations (Multipart)
      */
-    private void checkAndSendAlerts(Bitmap currentFrame, List<SeatBeltDetector.Detection> detections,
+    private void checkAndSendAlerts(Bitmap currentFrame, List<Detection> detections,
             DrowsinessDetector.DrowsinessResult dResult) {
         long now = System.currentTimeMillis();
 
@@ -178,7 +172,7 @@ public class DriverMonitorActivity extends AppCompatActivity {
                             "Tài xế có dấu hiệu ngủ gật (nhắm mắt > 3s)!");
                 }
                 AppRestClient.getInstance().sendViolation(AppConfig.DEFAULT_DRIVER_ID, "DROWSY", currentFrame, 0.0, 0.0,
-                        null);
+                                null);
                 SomnolenceRecordDto somnolenceDto = new SomnolenceRecordDto(
                         AppConfig.DEFAULT_DRIVER_ID,
                         dResult.ear,
@@ -198,24 +192,6 @@ public class DriverMonitorActivity extends AppCompatActivity {
                 }
                 AppRestClient.getInstance().sendViolation(AppConfig.DEFAULT_DRIVER_ID, "DISTRACTED", currentFrame, 0.0,
                         0.0, null);
-            }
-        }
-
-        // 3. Cảnh báo không đeo dây an toàn
-        if (detections != null) {
-            for (SeatBeltDetector.Detection d : detections) {
-                if (d.classId == 0 || "no-seatbelt".equalsIgnoreCase(d.label)) {
-                    if (now - lastSeatbeltAlertTime > ALERT_COOLDOWN_MS) {
-                        lastSeatbeltAlertTime = now;
-                        if (wsClient != null) {
-                            wsClient.sendRealtimeAlert(AppConfig.DEFAULT_DRIVER_ID, "NO_SEATBELT",
-                                    "Phát hiện tài xế không cài dây an toàn!");
-                        }
-                        AppRestClient.getInstance().sendViolation(AppConfig.DEFAULT_DRIVER_ID, "NO_SEATBELT",
-                                currentFrame, 0.0, 0.0, null);
-                    }
-                    break;
-                }
             }
         }
     }
@@ -248,21 +224,6 @@ public class DriverMonitorActivity extends AppCompatActivity {
                     }
                 });
         wsClient.connect();
-    }
-
-    private String[] loadLabels() {
-        List<String> labelList = new ArrayList<>();
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(getAssets().open("labels.txt")))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                line = line.trim();
-                if (!line.isEmpty())
-                    labelList.add(line);
-            }
-        } catch (IOException e) {
-            Log.e(TAG, "Error loading labels", e);
-        }
-        return labelList.toArray(new String[0]);
     }
 
     @Override
