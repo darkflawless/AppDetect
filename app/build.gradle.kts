@@ -1,6 +1,19 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
 }
+
+val localProperties = Properties().apply {
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        localPropertiesFile.inputStream().use { load(it) }
+    }
+}
+
+val serverIp: String = System.getenv("SERVER_IP")
+    ?: localProperties.getProperty("server.ip")
+    ?: "192.168.112.72"
 
 android {
     namespace = "com.example.myapplication"
@@ -19,6 +32,7 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "SERVER_IP", "\"$serverIp\"")
     }
 
     buildTypes {
@@ -46,6 +60,7 @@ android {
         }
     }
     buildFeatures {
+        buildConfig = true
         mlModelBinding = true
     }
 }
@@ -80,6 +95,8 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
     implementation(libs.gson)
+    // MQTT Client
+    implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.espresso.core)

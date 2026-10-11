@@ -22,6 +22,8 @@ import com.example.myapplication.data.model.SomnolenceRecordDto;
 import com.example.myapplication.network.api.AppRestClient;
 import com.example.myapplication.network.stream.UdpFrameSender;
 import com.example.myapplication.network.websocket.AppWebSocketClient;
+import com.example.myapplication.network.mqtt.AppMqttClient;
+import android.location.Location;
 import com.example.myapplication.service.LocationTrackingService;
 import com.example.myapplication.utils.AppConfig;
 
@@ -159,39 +161,94 @@ public class DriverMonitorActivity extends AppCompatActivity {
     /**
      * Kiểm tra kết quả AI và gửi cảnh báo WebSocket + POST /violations (Multipart)
      */
+    /**
+     * Kiểm tra kết quả AI và gửi cảnh báo MQTT QoS 1 + Tải snapshot MinIO S3
+     */
     private void checkAndSendAlerts(Bitmap currentFrame, List<Detection> detections,
             DrowsinessDetector.DrowsinessResult dResult) {
         long now = System.currentTimeMillis();
+        Location loc = LocationTrackingService.getSafeLocation(this);
+        double lat = loc.getLatitude();
+        double lng = loc.getLongitude();
+        float speedKmh = loc.getSpeed() * 3.6f;
 
-        // 1. Cảnh báo buồn ngủ
+        // 1. Cảnh báo buồn ngủ (DROWSINESS)
         if (dResult != null && dResult.isDrowsy) {
             if (now - lastDrowsyAlertTime > ALERT_COOLDOWN_MS) {
                 lastDrowsyAlertTime = now;
-                if (wsClient != null) {
-                    wsClient.sendRealtimeAlert(AppConfig.DEFAULT_DRIVER_ID, "DROWSY",
-                            "Tài xế có dấu hiệu ngủ gật (nhắm mắt > 3s)!");
-                }
-                AppRestClient.getInstance().sendViolation(AppConfig.DEFAULT_DRIVER_ID, "DROWSY", currentFrame, 0.0, 0.0,
+                float ear = dResult.ear;
+                float mar = dResult.mar;
+
+                // Upload ảnh snapshot trực tiếp lên MinIO S3 qua Presigned URL
+                AppRestClient.getInstance().uploadSnapshotToMinio(currentFrame, new AppRestClient.SnapshotUploadCallback() {
+                    @Override
+                    public void onSuccess(String publicUrl) {
+                        AppMqttClient.getInstance().publishSafetyAlert(
+                                AppConfig.DEFAULT_VEHICLE_UUID,
+                                AppConfig.DEFAULT_DRIVER_UUID,
+                                AppConfig.DEFAULT_SHIFT_ID,
+                                "DROWSINESS", "CRITICAL",
+                                lat, lng, speedKmh,
+                                ear, mar, -5.0f, 0.0f, 0.45f,
+                                publicUrl);
+                    }
+
+                    @Override
+                    public void onError(String error) {
+                        // Khi mất mạng/lỗi upload, vẫn đẩy cảnh báo lên MQTT (tự đệm vào SQLite Outbox)
+                        AppMqttClient.getInstance().publishSafetyAlert(
+                                AppConfig.DEFAULT_VEHICLE_UUID,
+                                AppConfig.DEFAULT_DRIVER_UUID,
+                                AppConfig.DEFAULT_SHIFT_ID,
+                                "DROWSINESS", "CRITICAL",
+                                lat, lng, speedKmh,
+                                ear, mar, -5.0f, 0.0f, 0.45f,
                                 null);
-                SomnolenceRecordDto somnolenceDto = new SomnolenceRecordDto(
-                        AppConfig.DEFAULT_DRIVER_ID,
-                        dResult.ear,
-                        dResult.mar,
-                        dResult.closedEyeDurationMs);
-                AppRestClient.getInstance().sendSomnolenceRecord(somnolenceDto, null);
+                    }
+                });
+
+                if (wsClient != null) {
+                    wsClient.sendRealtimeAlert(AppConfig.DEFAULT_DRIVER_ID, "DROWSY", "Tài xế có dấu hiệu ngủ gật!");
+                }
             }
         }
 
-        // 2. Cảnh báo mất tập trung (quay đầu)
+        // 2. Cảnh báo mất tập trung quay đầu (DISTRACTION)
         if (dResult != null && dResult.isDistracted) {
             if (now - lastDistractedAlertTime > ALERT_COOLDOWN_MS) {
                 lastDistractedAlertTime = now;
+                float ear = dResult.ear;
+                float mar = dResult.mar;
+
+                AppRestClient.getInstance().uploadSnapshotToMinio(currentFrame, new AppRestClient.SnapshotUploadCallback() {
+                    @Override
+                    public void onSuccess(String publicUrl) {
+                        AppMqttClient.getInstance().publishSafetyAlert(
+                                AppConfig.DEFAULT_VEHICLE_UUID,
+                                AppConfig.DEFAULT_DRIVER_UUID,
+                                AppConfig.DEFAULT_SHIFT_ID,
+                                "DISTRACTION", "HIGH",
+                                lat, lng, speedKmh,
+                                ear, mar, 0.0f, 30.0f, 0.0f,
+                                publicUrl);
+                    }
+
+                    @Override
+                    public void onError(String error) {
+                        AppMqttClient.getInstance().publishSafetyAlert(
+                                AppConfig.DEFAULT_VEHICLE_UUID,
+                                AppConfig.DEFAULT_DRIVER_UUID,
+                                AppConfig.DEFAULT_SHIFT_ID,
+                                "DISTRACTION", "HIGH",
+                                lat, lng, speedKmh,
+                                ear, mar, 0.0f, 30.0f, 0.0f,
+                                null);
+                    }
+                });
+
                 if (wsClient != null) {
-                    wsClient.sendRealtimeAlert(AppConfig.DEFAULT_DRIVER_ID, "DISTRACTED",
-                            "Tài xế quay đầu mất tập trung!");
+                    wsClient.sendRealtimeAlert(AppConfig.DEFAULT_DRIVER_ID, "DISTRACTED", "Tài xế quay đầu mất tập trung!");
                 }
-                AppRestClient.getInstance().sendViolation(AppConfig.DEFAULT_DRIVER_ID, "DISTRACTED", currentFrame, 0.0,
-                        0.0, null);
             }
         }
     }
@@ -224,6 +281,7 @@ public class DriverMonitorActivity extends AppCompatActivity {
                     }
                 });
         wsClient.connect();
+        AppMqttClient.getInstance().connect(this, null, null);
     }
 
     @Override
@@ -247,6 +305,7 @@ public class DriverMonitorActivity extends AppCompatActivity {
             wsClient.disconnect();
         if (udpSender != null)
             udpSender.close();
+        AppMqttClient.getInstance().disconnect();
         LocationTrackingService.stop(this);
     }
 }

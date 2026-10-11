@@ -26,7 +26,8 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.MyApplication"
         android:largeHeap="true"
-        android:usesCleartextTraffic="true">
+        android:usesCleartextTraffic="true"
+        android:networkSecurityConfig="@xml/network_security_config">
 
         <!-- Màn hình xác thực tài xế - TẮT TẠM ĐỂ TEST -->
         <activity

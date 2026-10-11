@@ -195,6 +195,65 @@ public class AppRestClient {
         });
     }
 
+    public interface SnapshotUploadCallback {
+        void onSuccess(String publicUrl);
+        void onError(String error);
+    }
+
+    /**
+     * Tải ảnh snapshot bằng chứng vi phạm trực tiếp lên Backend /api/v1/media/upload (Multipart),
+     * sau đó Backend lưu trữ lên MinIO S3 an toàn, không lo lỗi sai lệch AWSv4 Host signature.
+     */
+    public void uploadSnapshotToMinio(Bitmap bitmap, SnapshotUploadCallback callback) {
+        if (bitmap == null || bitmap.isRecycled()) {
+            if (callback != null) callback.onError("Bitmap null hoặc đã bị recycled");
+            return;
+        }
+
+        networkExecutor.execute(() -> {
+            try {
+                // 1. Nén Bitmap sang JPEG
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 75, baos);
+                byte[] jpegBytes = baos.toByteArray();
+
+                // 2. Gửi Multipart HTTP POST lên Backend /api/v1/media/upload
+                RequestBody fileBody = RequestBody.create(jpegBytes, JPEG_MEDIA_TYPE);
+                MultipartBody multipartBody = new MultipartBody.Builder()
+                        .setType(MultipartBody.FORM)
+                        .addFormDataPart("file", "snapshot_" + System.currentTimeMillis() + ".jpg", fileBody)
+                        .addFormDataPart("folder", "snapshots")
+                        .build();
+
+                Request uploadReq = new Request.Builder()
+                        .url(AppConfig.getBaseRestUrl() + "/api/v1/media/upload")
+                        .post(multipartBody)
+                        .build();
+
+                Response uploadRes = httpClient.newCall(uploadReq).execute();
+                if (uploadRes.isSuccessful() && uploadRes.body() != null) {
+                    String resJson = uploadRes.body().string();
+                    uploadRes.close();
+
+                    com.google.gson.JsonObject json = gson.fromJson(resJson, com.google.gson.JsonObject.class);
+                    com.google.gson.JsonObject data = json.has("data") ? json.getAsJsonObject("data") : json;
+                    String publicUrl = data.has("public_url") ? data.get("public_url").getAsString() : "";
+
+                    Log.i(TAG, "📸 [Upload Snapshot Thành công] URL: " + publicUrl);
+                    if (callback != null) callback.onSuccess(publicUrl);
+                } else {
+                    int code = uploadRes != null ? uploadRes.code() : -1;
+                    if (uploadRes != null) uploadRes.close();
+                    Log.w(TAG, "❌ Lỗi POST /api/v1/media/upload: code " + code);
+                    if (callback != null) callback.onError("Upload code " + code);
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "❌ Lỗi uploadSnapshotToMinio: " + e.getMessage());
+                if (callback != null) callback.onError(e.getMessage());
+            }
+        });
+    }
+
     private static class DefaultCallback implements Callback {
         private final String apiName;
 

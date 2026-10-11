@@ -20,6 +20,7 @@ import androidx.core.content.ContextCompat;
 import com.example.myapplication.R;
 import com.example.myapplication.data.model.VehicleLogDto;
 import com.example.myapplication.network.api.AppRestClient;
+import com.example.myapplication.network.mqtt.AppMqttClient;
 import com.example.myapplication.utils.AppConfig;
 import com.google.android.gms.location.FusedLocationProviderClient;
 import com.google.android.gms.location.LocationCallback;
@@ -29,8 +30,9 @@ import com.google.android.gms.location.LocationServices;
 import com.google.android.gms.location.Priority;
 
 /**
- * LocationTrackingService - Foreground Service chạy nền liên tục để thu thập GPS xe
- * và gửi về Server (POST /vehicle-logs) mỗi 5 giây.
+ * LocationTrackingService - Foreground Service chạy nền liên tục để thu thập GPS xe:
+ * 1. Publish MQTT Telemetry QoS 0 lên topic driverguard/telemetry/{vehicle_id}/gps
+ * 2. Cung cấp hàm fallback GPS getSafeLocation() cho môi trường trong nhà
  */
 public class LocationTrackingService extends Service {
 
@@ -38,7 +40,7 @@ public class LocationTrackingService extends Service {
     private static final String CHANNEL_ID = "appdetect_gps_channel";
     private static final int NOTIFICATION_ID = 1001;
 
-    private static final long GPS_INTERVAL_MS = 5000L; // Cứ 5 giây cập nhật vị trí 1 lần
+    private static final long GPS_INTERVAL_MS = 5000L;
     private static final long GPS_FASTEST_INTERVAL_MS = 3000L;
 
     public static final String ACTION_START = "ACTION_START_LOCATION_SERVICE";
@@ -47,6 +49,20 @@ public class LocationTrackingService extends Service {
     private FusedLocationProviderClient fusedLocationClient;
     private LocationCallback locationCallback;
     private boolean isTracking = false;
+
+    public static volatile Location lastKnownLocation;
+
+    public static Location getSafeLocation(Context context) {
+        if (lastKnownLocation != null) {
+            return lastKnownLocation;
+        }
+        Location fallback = new Location("indoor_fallback");
+        fallback.setLatitude(21.028511);
+        fallback.setLongitude(105.854444);
+        fallback.setSpeed(0.0f);
+        fallback.setTime(System.currentTimeMillis());
+        return fallback;
+    }
 
     public static void start(Context context) {
         Intent intent = new Intent(context, LocationTrackingService.class);
@@ -64,6 +80,7 @@ public class LocationTrackingService extends Service {
     public void onCreate() {
         super.onCreate();
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
+        AppMqttClient.getInstance().connect(this, null, null);
 
         locationCallback = new LocationCallback() {
             @Override
@@ -125,6 +142,11 @@ public class LocationTrackingService extends Service {
                 .build();
 
         try {
+            fusedLocationClient.getLastLocation().addOnSuccessListener(loc -> {
+                if (loc != null) {
+                    onNewLocation(loc);
+                }
+            });
             fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper());
         } catch (Exception e) {
             Log.e(TAG, "Lỗi request location updates: " + e.getMessage());
@@ -138,19 +160,18 @@ public class LocationTrackingService extends Service {
     }
 
     private void onNewLocation(Location location) {
+        lastKnownLocation = location;
         double lat = location.getLatitude();
         double lng = location.getLongitude();
-        float speed = location.getSpeed(); // m/s
-        Log.d(TAG, String.format("📍 GPS: Lat=%.6f, Lng=%.6f, Speed=%.1f km/h", lat, lng, speed * 3.6f));
+        float speedMps = location.getSpeed();
+        float speedKmh = speedMps * 3.6f;
+        Log.d(TAG, String.format("📍 GPS: Lat=%.6f, Lng=%.6f, Speed=%.1f km/h", lat, lng, speedKmh));
 
-        // Gửi REST API POST /vehicle-logs lên Server qua DTO
-        VehicleLogDto dto = new VehicleLogDto(
-                AppConfig.DEFAULT_DRIVER_ID,
-                AppConfig.DEFAULT_VEHICLE_ID,
-                lat,
-                lng,
-                speed
-        );
+        // 1. Giao thức mới: Publish MQTT Telemetry QoS 0
+        AppMqttClient.getInstance().publishTelemetry(AppConfig.DEFAULT_VEHICLE_UUID, lat, lng, speedKmh);
+
+        // 2. Gửi REST API phụ trợ
+        VehicleLogDto dto = new VehicleLogDto(AppConfig.DEFAULT_DRIVER_ID, AppConfig.DEFAULT_VEHICLE_ID, lat, lng, speedMps);
         AppRestClient.getInstance().sendVehicleLog(dto, null);
     }
 
@@ -162,7 +183,7 @@ public class LocationTrackingService extends Service {
                     NotificationManager.IMPORTANCE_LOW
             );
             channel.setDescription("Thông báo dịch vụ theo dõi vị trí GPS cho xe");
-            NotificationManager manager = getSystemService(NotificationManager.class);
+            NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
             if (manager != null) {
                 manager.createNotificationChannel(channel);
             }
