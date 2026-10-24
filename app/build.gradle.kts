@@ -95,6 +95,11 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
     implementation(libs.gson)
+    // Retrofit for API calls
+    implementation("com.squareup.retrofit2:retrofit:2.9.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
+    // AndroidX Security Crypto for encrypted shared preferences
+    implementation("androidx.security:security-crypto:1.1.0-alpha03")
     // MQTT Client
     implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
 

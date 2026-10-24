@@ -1,4 +1,4 @@
-﻿package com.example.myapplication.data.model;
+package com.example.myapplication.data.model;
 
 public class DriverResponse {
     private String id;

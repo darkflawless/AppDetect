@@ -11,6 +11,7 @@ public class SecureTokenManager {
     private static final String PREF_FILE_NAME = "secure_token_prefs";
     private static final String KEY_ACCESS_TOKEN = "access_token";
     private static final String KEY_DRIVER_ID = "driver_id";
+    private static final String KEY_FULL_NAME = "full_name";
     private static SecureTokenManager instance;
     private SharedPreferences encryptedPreferences;
 
@@ -44,6 +45,18 @@ public class SecureTokenManager {
                     .putString(KEY_DRIVER_ID, driverId)
                     .apply();
         }
+    }
+
+    public void saveFullName(String fullName) {
+        if (encryptedPreferences != null) {
+            encryptedPreferences.edit()
+                    .putString(KEY_FULL_NAME, fullName)
+                    .apply();
+        }
+    }
+
+    public String getFullName() {
+        return encryptedPreferences != null ? encryptedPreferences.getString(KEY_FULL_NAME, null) : null;
     }
 
     public String getToken() {

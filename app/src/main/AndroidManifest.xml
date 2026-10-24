@@ -31,7 +31,7 @@
 
         <!-- Màn hình Dashboard cho tài xế -->
         <activity
-            android:name=".ui.DashboardActivity"
+            android:name=".ui.LoginActivity"
             android:exported="true"
             android:screenOrientation="portrait">
             <intent-filter>
@@ -39,6 +39,19 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Dashboard activity (no launcher) -->
+        <activity
+            android:name=".ui.DashboardActivity"
+            android:exported="true"
+            android:screenOrientation="portrait" />
+
+        <!-- Driver profile screen -->
+        <activity
+            android:name=".ui.DriverProfileActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
 
         <!-- Màn hình xác thực tài xế -->
         <activity

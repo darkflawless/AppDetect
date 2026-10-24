@@ -2,4 +2,28 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
-</resources>
+    <color name="background">#F4F7F5</color>
+    <color name="cardBackground">#FFFFFFFF</color>
+    <color name="primary">#1565C0</color>
+    <color name="primaryDark">#0D47A1</color>
+    
+    <!-- Theme Green Dashboard (theo ảnh mẫu) -->
+    <color name="dash_green_header">#1B6A3B</color>
+    <color name="dash_green_accent">#1B7A41</color>
+    <color name="dash_green_light">#E8F5E9</color>
+    <color name="dash_status_green">#2E7D32</color>
+    <color name="dash_logout_bg">#D32F2F</color>
+    
+    <color name="text_main">#212121</color>
+    <color name="text_secondary">#757575</color>
+    <color name="text_title">#1E293B</color>
+    <color name="card_border">#E2E8F0</color>
+    <color name="blue_dot">#1976D2</color>
+
+    <color name="primaryText">#1A237E</color>
+    <color name="secondaryText">#546E7A</color>
+    <color name="divider">#E0E0E0</color>
+    <color name="accent">#29B6F6</color>
+    <color name="success">#43A047</color>
+    <color name="error">#E53935</color>
+</resources>

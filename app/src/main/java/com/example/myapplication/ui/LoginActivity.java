@@ -54,17 +54,29 @@ public class LoginActivity extends AppCompatActivity {
             @Override
             public void onResponse(Call<LoginResponse> call, Response<LoginResponse> response) {
                 progressBar.setVisibility(View.GONE);
-                if (response.isSuccessful() && response.body() != null) {
+                if (response.isSuccessful() && response.body() != null && response.body().isSuccess()) {
                     LoginResponse loginResponse = response.body();
-                    // Save token and driverId securely
-                    SecureTokenManager.getInstance(getApplicationContext())
-                            .saveToken(loginResponse.getAccessToken(), loginResponse.getDriverId());
+                    String driverId = loginResponse.getDriverId();
+                    String token = loginResponse.getAccessToken();
+                    
+                    SecureTokenManager tokenManager = SecureTokenManager.getInstance(getApplicationContext());
+                    tokenManager.saveToken(token, driverId);
+
+                    if (loginResponse.getData() != null && loginResponse.getData().getStaff() != null) {
+                        String fullName = loginResponse.getData().getStaff().getFullName();
+                        if (fullName != null) {
+                            tokenManager.saveFullName(fullName);
+                        }
+                    }
+
                     // Navigate to Dashboard
                     Intent intent = new Intent(LoginActivity.this, DashboardActivity.class);
                     startActivity(intent);
                     finish();
                 } else {
-                    Toast.makeText(LoginActivity.this, "Đăng nhập thất bại", Toast.LENGTH_SHORT).show();
+                    String msg = (response.body() != null && response.body().getMessage() != null)
+                            ? response.body().getMessage() : "Dang nhap that bai (HTTP " + response.code() + ")";
+                    Toast.makeText(LoginActivity.this, msg, Toast.LENGTH_SHORT).show();
                 }
             }
 
