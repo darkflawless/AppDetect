@@ -143,9 +143,7 @@ public class DashboardActivity extends AppCompatActivity {
 
                         String rawAvatarUrl = data.getUrlImage();
                         if (rawAvatarUrl != null && !rawAvatarUrl.isEmpty()) {
-                            String fixedAvatarUrl = rawAvatarUrl
-                                    .replace("localhost", "192.168.1.11")
-                                    .replace("127.0.0.1", "192.168.1.11");
+                            String fixedAvatarUrl = com.example.myapplication.utils.AppConfig.formatMediaUrl(rawAvatarUrl);
                             tokenManager.saveAvatarUrl(fixedAvatarUrl);
 
                             if (!isFinishing() && !isDestroyed() && ivDashAvatar != null) {

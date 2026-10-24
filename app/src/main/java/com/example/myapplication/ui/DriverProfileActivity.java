@@ -87,11 +87,7 @@ public class DriverProfileActivity extends AppCompatActivity {
                         // Load avatar tài xế bằng Glide
                         String rawAvatarUrl = data.getUrlImage();
                         if (rawAvatarUrl != null && !rawAvatarUrl.isEmpty()) {
-                            // Chuyển localhost hoặc 127.0.0.1 thành 192.168.1.11 để điện thoại truy cập được
-                            String fixedAvatarUrl = rawAvatarUrl
-                                    .replace("localhost", "192.168.1.11")
-                                    .replace("127.0.0.1", "192.168.1.11");
-
+                            String fixedAvatarUrl = com.example.myapplication.utils.AppConfig.formatMediaUrl(rawAvatarUrl);
                             mgr.saveAvatarUrl(fixedAvatarUrl);
 
                             if (!isFinishing() && !isDestroyed()) {

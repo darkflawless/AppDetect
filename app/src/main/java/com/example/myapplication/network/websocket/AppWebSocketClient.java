@@ -52,7 +52,7 @@ public class AppWebSocketClient {
      * @param listener  callback nhận lệnh START/STOP
      */
     public AppWebSocketClient(String backendIp, long driverId, StreamCommandListener listener) {
-        this.serverUrl = "ws://" + backendIp + ":8080/ws/realtime?type=APP&driverId=" + driverId;
+        this.serverUrl = "ws://" + backendIp + ":" + com.example.myapplication.utils.AppConfig.WS_PORT + "/ws/realtime?type=APP&driverId=" + driverId;
         this.listener = listener;
     }
 
