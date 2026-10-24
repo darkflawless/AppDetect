@@ -21,6 +21,7 @@ public class DriverProfileActivity extends AppCompatActivity {
     private TextView tvDriverName, tvDriverId, tvDriverPhone, tvDriverEmail;
     private TextView tvDriverDob, tvDriverGender, tvDriverHireDate, tvDriverAddress;
     private TextView tvActiveStatus, tvAccessToken;
+    private android.widget.ImageView ivDriverAvatar;
     private View btnBack;
 
     @Override
@@ -39,6 +40,7 @@ public class DriverProfileActivity extends AppCompatActivity {
         tvDriverAddress  = findViewById(R.id.tv_driver_address);
         tvActiveStatus   = findViewById(R.id.tv_active_status);
         tvAccessToken    = findViewById(R.id.tv_access_token);
+        ivDriverAvatar   = findViewById(R.id.iv_driver_avatar);
         btnBack          = findViewById(R.id.btn_back);
 
         if (btnBack != null) {
@@ -81,6 +83,26 @@ public class DriverProfileActivity extends AppCompatActivity {
                         
                         // Ngày nhận việc
                         tvDriverHireDate.setText(data.getHireDate() != null ? data.getHireDate() : "---");
+
+                        // Load avatar tài xế bằng Glide
+                        String rawAvatarUrl = data.getUrlImage();
+                        if (rawAvatarUrl != null && !rawAvatarUrl.isEmpty()) {
+                            // Chuyển localhost hoặc 127.0.0.1 thành 192.168.1.11 để điện thoại truy cập được
+                            String fixedAvatarUrl = rawAvatarUrl
+                                    .replace("localhost", "192.168.1.11")
+                                    .replace("127.0.0.1", "192.168.1.11");
+
+                            mgr.saveAvatarUrl(fixedAvatarUrl);
+
+                            if (!isFinishing() && !isDestroyed()) {
+                                com.bumptech.glide.Glide.with(DriverProfileActivity.this)
+                                        .load(fixedAvatarUrl)
+                                        .circleCrop()
+                                        .placeholder(R.drawable.ic_launcher_foreground)
+                                        .error(R.drawable.ic_launcher_foreground)
+                                        .into(ivDriverAvatar);
+                            }
+                        }
 
                         // Thông tin staff
                         DriverMeResponse.Staff staff = data.getStaff();

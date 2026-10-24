@@ -52,18 +52,14 @@
             android:paddingBottom="24dp">
 
             <!-- Avatar -->
-            <LinearLayout
-                android:layout_width="72dp"
-                android:layout_height="72dp"
+            <ImageView
+                android:id="@+id/iv_driver_avatar"
+                android:layout_width="80dp"
+                android:layout_height="80dp"
                 android:background="@drawable/bg_avatar_circle"
-                android:gravity="center">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="&#128104;&#8205;&#9992;&#65039;"
-                    android:textSize="38sp" />
-            </LinearLayout>
+                android:padding="3dp"
+                android:scaleType="centerCrop"
+                android:src="@drawable/ic_launcher_foreground" />
 
             <TextView
                 android:id="@+id/tv_driver_name"

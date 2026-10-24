@@ -100,18 +100,14 @@
                     android:gravity="center_vertical">
 
                     <!-- Avatar tròn -->
-                    <LinearLayout
+                    <ImageView
+                        android:id="@+id/iv_dash_avatar"
                         android:layout_width="56dp"
                         android:layout_height="56dp"
                         android:background="@drawable/bg_avatar_circle"
-                        android:gravity="center">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="&#128104;&#8205;&#9992;&#65039;"
-                            android:textSize="28sp" />
-                    </LinearLayout>
+                        android:padding="2dp"
+                        android:scaleType="centerCrop"
+                        android:src="@drawable/ic_launcher_foreground" />
 
                     <!-- Info bên phải -->
                     <LinearLayout

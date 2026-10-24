@@ -59,6 +59,18 @@ public class SecureTokenManager {
         return encryptedPreferences != null ? encryptedPreferences.getString(KEY_FULL_NAME, null) : null;
     }
 
+    public void saveAvatarUrl(String avatarUrl) {
+        if (encryptedPreferences != null) {
+            encryptedPreferences.edit()
+                    .putString("avatar_url", avatarUrl)
+                    .apply();
+        }
+    }
+
+    public String getAvatarUrl() {
+        return encryptedPreferences != null ? encryptedPreferences.getString("avatar_url", null) : null;
+    }
+
     public String getToken() {
         return encryptedPreferences != null ? encryptedPreferences.getString(KEY_ACCESS_TOKEN, null) : null;
     }

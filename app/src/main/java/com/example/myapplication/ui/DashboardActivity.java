@@ -24,6 +24,8 @@ public class DashboardActivity extends AppCompatActivity {
     private View tabHome, tabSchedule, tabHistory;
     private View btnMenu, btnNotification;
 
+    private android.widget.ImageView ivDashAvatar;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -32,6 +34,7 @@ public class DashboardActivity extends AppCompatActivity {
         // Bind views
         tvDashGreeting     = findViewById(R.id.tv_dash_greeting);
         tvDashDriverCode   = findViewById(R.id.tv_dash_driver_code);
+        ivDashAvatar       = findViewById(R.id.iv_dash_avatar);
         btnMenuProfile     = findViewById(R.id.btn_menu_profile);
         tabProfile         = findViewById(R.id.tab_profile);
         btnLogout          = findViewById(R.id.btn_logout);
@@ -48,15 +51,26 @@ public class DashboardActivity extends AppCompatActivity {
         SecureTokenManager tokenManager = SecureTokenManager.getInstance(getApplicationContext());
         String fullName = tokenManager.getFullName();
         String driverId = tokenManager.getDriverId();
+        String cachedAvatar = tokenManager.getAvatarUrl();
 
         if (fullName != null && !fullName.isEmpty()) {
             tvDashGreeting.setText("Xin chào, " + fullName);
         }
         if (driverId != null && !driverId.isEmpty()) {
-            // Lấy 6-8 ký tự đầu để hiển thị mã tài xế ngắn gọn giống ảnh mẫu (DRV-XXXXXX)
             String shortCode = driverId.length() > 8 ? driverId.substring(0, 8).toUpperCase() : driverId.toUpperCase();
             tvDashDriverCode.setText("DRV-" + shortCode);
         }
+        if (cachedAvatar != null && !cachedAvatar.isEmpty()) {
+            com.bumptech.glide.Glide.with(this)
+                    .load(cachedAvatar)
+                    .circleCrop()
+                    .placeholder(R.drawable.ic_launcher_foreground)
+                    .error(R.drawable.ic_launcher_foreground)
+                    .into(ivDashAvatar);
+        }
+
+        // Tự động fetch profile từ /drivers/me để lấy avatar mới nhất và cập nhật UI
+        loadDriverProfile(tokenManager);
 
         // Click Xem hồ sơ cá nhân -> Mở màn hình DriverProfileActivity
         View.OnClickListener openProfileListener = v -> {
@@ -87,5 +101,70 @@ public class DashboardActivity extends AppCompatActivity {
         if (tabHistory != null) tabHistory.setOnClickListener(placeholder);
         if (btnMenu != null) btnMenu.setOnClickListener(placeholder);
         if (btnNotification != null) btnNotification.setOnClickListener(placeholder);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        SecureTokenManager tokenManager = SecureTokenManager.getInstance(getApplicationContext());
+        String cachedAvatar = tokenManager.getAvatarUrl();
+        if (cachedAvatar != null && !cachedAvatar.isEmpty() && ivDashAvatar != null) {
+            com.bumptech.glide.Glide.with(this)
+                    .load(cachedAvatar)
+                    .circleCrop()
+                    .placeholder(R.drawable.ic_launcher_foreground)
+                    .error(R.drawable.ic_launcher_foreground)
+                    .into(ivDashAvatar);
+        }
+    }
+
+    private void loadDriverProfile(SecureTokenManager tokenManager) {
+        String token = tokenManager.getToken();
+        if (token == null || token.isEmpty()) return;
+
+        com.example.myapplication.network.api.ApiService api = com.example.myapplication.network.api.RetrofitClient.getApiService();
+        api.getDriverMe("Bearer " + token).enqueue(new retrofit2.Callback<com.example.myapplication.data.model.DriverMeResponse>() {
+            @Override
+            public void onResponse(retrofit2.Call<com.example.myapplication.data.model.DriverMeResponse> call,
+                                   retrofit2.Response<com.example.myapplication.data.model.DriverMeResponse> response) {
+                if (response.isSuccessful() && response.body() != null && response.body().isSuccess()) {
+                    com.example.myapplication.data.model.DriverMeResponse.DriverData data = response.body().getData();
+                    if (data != null) {
+                        if (data.getStaff() != null && data.getStaff().getFullName() != null) {
+                            String name = data.getStaff().getFullName();
+                            tvDashGreeting.setText("Xin chào, " + name);
+                            tokenManager.saveFullName(name);
+                        }
+                        if (data.getId() != null) {
+                            String code = data.getId().length() > 8 ? data.getId().substring(0, 8).toUpperCase() : data.getId().toUpperCase();
+                            tvDashDriverCode.setText("DRV-" + code);
+                            tokenManager.saveToken(token, data.getId());
+                        }
+
+                        String rawAvatarUrl = data.getUrlImage();
+                        if (rawAvatarUrl != null && !rawAvatarUrl.isEmpty()) {
+                            String fixedAvatarUrl = rawAvatarUrl
+                                    .replace("localhost", "192.168.1.11")
+                                    .replace("127.0.0.1", "192.168.1.11");
+                            tokenManager.saveAvatarUrl(fixedAvatarUrl);
+
+                            if (!isFinishing() && !isDestroyed() && ivDashAvatar != null) {
+                                com.bumptech.glide.Glide.with(DashboardActivity.this)
+                                        .load(fixedAvatarUrl)
+                                        .circleCrop()
+                                        .placeholder(R.drawable.ic_launcher_foreground)
+                                        .error(R.drawable.ic_launcher_foreground)
+                                        .into(ivDashAvatar);
+                            }
+                        }
+                    }
+                }
+            }
+
+            @Override
+            public void onFailure(retrofit2.Call<com.example.myapplication.data.model.DriverMeResponse> call, Throwable t) {
+                // Ignore network error silently on dashboard background fetch
+            }
+        });
     }
 }
