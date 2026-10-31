@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.cardview.widget.CardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    app:cardCornerRadius="12dp"
+    app:cardElevation="2dp"
+    app:cardBackgroundColor="@color/white"
+    android:layout_marginBottom="12dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="14dp">
+
+        <!-- Hàng giờ + trạng thái -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/tv_item_trip_time"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="&#128338; 08:00 - 10:00  |  "
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_main" />
+
+            <TextView
+                android:id="@+id/tv_item_trip_status"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="&#9679; Sắp chạy"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="@color/blue_dot" />
+        </LinearLayout>
+
+        <!-- Thông tin Tuyến & Biển số xe -->
+        <TextView
+            android:id="@+id/tv_item_route_vehicle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Tuyến: Tuyến nội đô | Xe: 29B-123.45"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textColor="@color/primaryText"
+            android:layout_marginTop="6dp" />
+
+        <!-- Điểm đi -->
+        <TextView
+            android:id="@+id/tv_item_start_location"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Điểm đi: 123 Phố Huế, Hà Nội"
+            android:textSize="12sp"
+            android:textColor="@color/text_secondary"
+            android:layout_marginTop="4dp" />
+
+        <!-- Điểm đến -->
+        <TextView
+            android:id="@+id/tv_item_end_location"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Điểm đến: Bến xe Mỹ Đình, Hà Nội"
+            android:textSize="12sp"
+            android:textColor="@color/text_secondary"
+            android:layout_marginTop="2dp" />
+
+        <!-- Khoảng cách (nếu có) -->
+        <TextView
+            android:id="@+id/tv_item_distance"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Khoảng cách: 15.2 km"
+            android:textSize="11sp"
+            android:textColor="@color/secondaryText"
+            android:layout_marginTop="2dp"
+            android:visibility="gone" />
+
+        <!-- Nút Bắt đầu chuyến đi / Vào giám sát -->
+        <Button
+            android:id="@+id/btn_item_start_trip"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:background="@drawable/bg_btn_start_trip"
+            android:text="Bắt đầu chuyến đi"
+            android:textColor="@color/white"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginTop="10dp" />
+    </LinearLayout>
+</androidx.cardview.widget.CardView>

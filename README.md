@@ -1,40 +1,81 @@
-# Hướng dẫn cấu hình IP cho ứng dụng AppDetect
+# Hướng dẫn cấu hình và chạy ứng dụng AppDetect
 
-Để ứng dụng có thể kết nối được với server FastAPI chạy trên máy tính của bạn, bạn cần đảm bảo cả điện thoại và máy tính chạy cùng một mạng Wi-Fi và cấu hình đúng địa chỉ IP.
+Tài liệu này hướng dẫn cách cấu hình địa chỉ IP máy tính và các cổng dịch vụ (REST API, WebSocket, MQTT, UDP, Media MinIO) để điện thoại kết nối thông suốt với hệ thống Backend chạy trên máy tính.
 
-## Bước 1: Tìm địa chỉ IP máy tính của bạn
-1. Trên máy tính (Windows), nhấn phím `Windows + R`, gõ `cmd` và nhấn Enter.
-2. Trong cửa sổ dòng lệnh, gõ: `ipconfig`
-3. Tìm dòng **IPv4 Address** trong mục Wi-Fi (Ví dụ: `192.168.1.15`). Đây chính là địa chỉ IP bạn cần dùng.
+---
 
-## Bước 2: Cập nhật IP trong Code Android
-1.a Mở file: `app/src/main/java/com/example/myapplication/DriverVerifyActivity.java`
+## 📌 Nguyên tắc hoạt động
+* Điện thoại và máy tính chạy server **bắt buộc phải kết nối chung một mạng Wi-Fi** (hoặc chung mạng LAN/Hotspot).
+* Điện thoại **không bật 4G/5G** khi đang kết nối server nội bộ qua Wi-Fi.
+* Toàn bộ cấu hình IP và Port đã được **quản lý tập trung 100% tại file `gradle.properties`**, không cần sửa tay bất kỳ dòng code Java/XML nào.
 
-1.b Mở file `res/xml/network_security_config.xml`
+---
 
-2.a Tìm dòng code định nghĩa `BASE_URL` (thường ở gần đầu file):
-   ```java
-   private static final String BASE_URL = "http://192.168.x.x:8000";
+## Bước 1: Lấy địa chỉ IPv4 máy tính của bạn
+1. Trên máy tính Windows, mở terminal PowerShell hoặc Command Prompt (`Win + R` -> gõ `cmd` -> Enter).
+2. Chạy lệnh:
+   ```cmd
+   ipconfig
    ```
-   
-2.b tìm dòng code **<domain includeSubdomains="true">192.168.x.x</domain>**
+3. Tìm phần card mạng Wi-Fi (hoặc Ethernet nếu cắm dây LAN), ghi lại dòng **IPv4 Address** (Ví dụ: `192.168.1.11`).
 
-3. Thay đổi `192.168.x.x` thành địa chỉ IPv4 bạn vừa tìm được ở Bước 1.
-   *Ví dụ:* `private static final String BASE_URL = "http://192.168.1.15:8000";`
-4. Lưu file và chạy lại ứng dụng (Build & Run).
+---
 
-## Bước 3: Lưu ý quan trọng trên Server (FastAPI)
-Khi chạy server FastAPI trên máy tính, bạn phải cho phép nó nhận kết nối từ các thiết bị khác trong mạng bằng cách bind vào địa chỉ `0.0.0.0`.
+## Bước 2: Cập nhật cấu hình tập trung trong `gradle.properties`
+Mở file **`gradle.properties`** ở thư mục gốc của project Android, tìm đến phần:
 
-Lệnh chạy server nên là:
-```bash
-uvicorn main:app --host 0.0.0.0 --port 8000
+```properties
+# ==============================================================================
+# CẤU HÌNH KẾT NỐI SERVER TẬP TRUNG (SERVER IP & PORTS CONFIGURATION)
+# Khi thay đổi địa chỉ IP máy tính (mạng Wi-Fi mới) hoặc Port, chỉ cần sửa tại đây!
+# Sau khi sửa, chạy lại app hoặc Sync Gradle để cập nhật vào BuildConfig.
+# ==============================================================================
+
+# Địa chỉ IPv4 của máy tính chạy Server trong mạng LAN (xem bằng lệnh 'ipconfig' trên Windows)
+server.ip=192.168.1.11
+
+# Cổng REST API của Backend Spring Boot (phục vụ đăng nhập, lấy hồ sơ /drivers/me, lịch trình, ca chạy, vi phạm)
+server.rest_port=8080
+
+# Cổng WebSocket Realtime (phục vụ nhận lệnh START/STOP stream và bắn sự kiện cảnh báo khẩn cấp lên Web Admin)
+server.ws_port=8080
+
+# Cổng MQTT Broker (phục vụ gửi tọa độ GPS định kỳ, telemetry xe theo chu kỳ 1s)
+server.mqtt_port=1883
+
+# Cổng UDP Stream Video (phục vụ truyền luồng video khung hình tài xế trực tiếp với độ trễ thấp)
+server.udp_port=9090
+
+# Cổng Media Server / MinIO Object Storage (phục vụ lưu trữ và tải ảnh avatar tài xế, ảnh vi phạm)
+server.media_port=9000
 ```
-**(bước 3 này được chạy bên coreAI, hướng dẫn run server sẽ bên readme bên đó)**
-## Kiểm tra kết nối
-* Đảm bảo điện thoại **không** dùng 4G/5G khi đang test nội bộ.
-* Đảm bảo Firewall (tường lửa) trên máy tính không chặn cổng `8000`.
-* Bạn có thể kiểm tra bằng cách mở trình duyệt trên điện thoại và truy cập thử vào địa chỉ IP đó (Ví dụ: `http://192.168.1.15:8000/docs`). Nếu hiện trang tài liệu FastAPI là kết nối đã thông suốt.
 
+👉 **Bạn chỉ cần thay giá trị `server.ip`** thành địa chỉ IPv4 vừa tìm được ở Bước 1. Các cổng dịch vụ (`rest_port`, `ws_port`, `media_port`...) có thể điều chỉnh tùy theo môi trường triển khai thực tế.
 
+---
 
+## Bước 3: Build và cài đặt ứng dụng
+Sau khi sửa `gradle.properties`, bạn có thể chạy:
+
+* **Qua Android Studio**: Nhấn nút **Sync Project with Gradle Files** 🐘 -> Nhấn nút **Run 'app'** ▶️.
+* **Hoặc qua dòng lệnh (Terminal)**:
+  ```powershell
+  ./gradlew installDebug
+  ```
+
+Gradle sẽ tự động inject các thông số cấu hình này vào `BuildConfig` và toàn bộ các module trong ứng dụng (`RetrofitClient`, `AppWebSocketClient`, `Glide`, `AppMqttClient`, `UdpFrameSender`) sẽ tự động cập nhật ngay lập tức.
+
+---
+
+## Bước 4: Kiểm tra kết nối từ điện thoại
+1. **Kiểm tra REST API Backend**: Mở trình duyệt Chrome trên điện thoại, truy cập:
+   ```text
+   http://<IP_MAY_TINH>:8080/swagger-ui.html
+   ```
+   *(Ví dụ: `http://192.168.1.11:8080/swagger-ui.html`)*  
+   Nếu trang Swagger của Backend hiển thị thành công, kết nối mạng giữa điện thoại và máy tính đã thông suốt.
+
+2. **Nếu điện thoại không kết nối được**:
+   * Kiểm tra **Windows Defender Firewall**: Tạm thời tắt hoặc mở quyền Inbound Rule cho cổng `8080`, `9000`, `1883`, `9090`.
+   * Đảm bảo kiểu mạng Wi-Fi trên Windows đang là **Private Network** (thay vì Public Network).
+   * Đảm bảo Backend Spring Boot đã được khởi động (`mvn spring-boot:run`).

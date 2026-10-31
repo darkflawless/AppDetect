@@ -26,6 +26,7 @@ import com.example.myapplication.network.mqtt.AppMqttClient;
 import android.location.Location;
 import com.example.myapplication.service.LocationTrackingService;
 import com.example.myapplication.utils.AppConfig;
+import com.example.myapplication.utils.SecureTokenManager;
 
 import java.util.List;
 
@@ -51,6 +52,12 @@ public class DriverMonitorActivity extends AppCompatActivity {
     private UdpFrameSender udpSender;
     private AppWebSocketClient wsClient;
 
+    // Dữ liệu hành trình & phương tiện
+    private String tripId;
+    private String vehicleId;
+    private String vehiclePlate;
+    private String driverId;
+
     private boolean isTripStarted = false;
     private long lastDrowsyAlertTime = 0;
     private long lastDistractedAlertTime = 0;
@@ -70,7 +77,7 @@ public class DriverMonitorActivity extends AppCompatActivity {
                 }
 
                 if (locationGranted && isTripStarted) {
-                    LocationTrackingService.start(this);
+                    LocationTrackingService.start(this, getTargetVehicle());
                 }
             });
 
@@ -82,7 +89,21 @@ public class DriverMonitorActivity extends AppCompatActivity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setContentView(R.layout.activity_main);
 
-        // 2. Khởi tạo UI & Camera Modules
+        // 2. Trích xuất thông tin chuyến đi từ Intent & thông tin tài xế từ TokenManager
+        tripId = getIntent().getStringExtra("TRIP_ID");
+        vehicleId = getIntent().getStringExtra("VEHICLE_ID");
+        vehiclePlate = getIntent().getStringExtra("VEHICLE_PLATE");
+
+        SecureTokenManager tokenManager = SecureTokenManager.getInstance(getApplicationContext());
+        driverId = tokenManager.getDriverId();
+        String token = tokenManager.getToken();
+        if (token != null && !token.isEmpty()) {
+            AppRestClient.getInstance().setAuthToken(token);
+        }
+
+        Log.i(TAG, "🚀 Giám sát chuyến: tripId=" + tripId + ", vehicleId=" + vehicleId + ", plate=" + vehiclePlate + ", driverId=" + driverId);
+
+        // 3. Khởi tạo UI & Camera Modules
         uiManager = new UiManager(this);
         cameraManager = new CameraManager(this);
 
@@ -99,13 +120,22 @@ public class DriverMonitorActivity extends AppCompatActivity {
             checkAndStartServices();
         });
 
-        // 3. Khởi tạo AI Detection Pipeline
+        // 4. Khởi tạo AI Detection Pipeline
         detectionPipeline = new DetectionPipeline();
         detectionPipeline.loadModelsAsync(this, new DetectionPipeline.InitCallback() {
             @Override
             public void onSuccess() {
                 uiManager.enableStartButton();
                 Log.d(TAG, "AI models ready");
+
+                // Nếu mở từ Dashboard (đã bấm Bắt đầu chuyến đi), tự động bắt đầu giám sát
+                if (getIntent().hasExtra("TRIP_ID") || getIntent().hasExtra("VEHICLE_ID")) {
+                    runOnUiThread(() -> {
+                        isTripStarted = true;
+                        uiManager.startOverlay.setVisibility(android.view.View.GONE);
+                        checkAndStartServices();
+                    });
+                }
             }
 
             @Override
@@ -114,8 +144,32 @@ public class DriverMonitorActivity extends AppCompatActivity {
             }
         });
 
-        // 4. Khởi tạo Network Streaming (UDP + WebSocket)
+        // 5. Khởi tạo Network Streaming (UDP + WebSocket)
         initNetworkStreaming();
+    }
+
+    private String getTargetVehicle() {
+        if (vehicleId != null && !vehicleId.trim().isEmpty()) {
+            return vehicleId.trim();
+        }
+        if (vehiclePlate != null && !vehiclePlate.trim().isEmpty()) {
+            return vehiclePlate.trim();
+        }
+        return AppConfig.DEFAULT_VEHICLE_UUID;
+    }
+
+    private String getTargetDriver() {
+        if (driverId != null && !driverId.trim().isEmpty()) {
+            return driverId.trim();
+        }
+        return AppConfig.DEFAULT_DRIVER_UUID;
+    }
+
+    private String getTargetShift() {
+        if (tripId != null && !tripId.trim().isEmpty()) {
+            return tripId.trim();
+        }
+        return AppConfig.DEFAULT_SHIFT_ID;
     }
 
     private void checkAndStartServices() {
@@ -126,7 +180,7 @@ public class DriverMonitorActivity extends AppCompatActivity {
 
         if (hasCamera && hasLocation) {
             startCameraStream();
-            LocationTrackingService.start(this);
+            LocationTrackingService.start(this, getTargetVehicle());
         } else {
             permissionsLauncher.launch(new String[] {
                     Manifest.permission.CAMERA,
@@ -172,6 +226,10 @@ public class DriverMonitorActivity extends AppCompatActivity {
         double lng = loc.getLongitude();
         float speedKmh = loc.getSpeed() * 3.6f;
 
+        String targetVehicle = getTargetVehicle();
+        String targetDriver = getTargetDriver();
+        String targetShift = getTargetShift();
+
         // 1. Cảnh báo buồn ngủ (DROWSINESS)
         if (dResult != null && dResult.isDrowsy) {
             if (now - lastDrowsyAlertTime > ALERT_COOLDOWN_MS) {
@@ -184,9 +242,9 @@ public class DriverMonitorActivity extends AppCompatActivity {
                     @Override
                     public void onSuccess(String publicUrl) {
                         AppMqttClient.getInstance().publishSafetyAlert(
-                                AppConfig.DEFAULT_VEHICLE_UUID,
-                                AppConfig.DEFAULT_DRIVER_UUID,
-                                AppConfig.DEFAULT_SHIFT_ID,
+                                targetVehicle,
+                                targetDriver,
+                                targetShift,
                                 "DROWSINESS", "CRITICAL",
                                 lat, lng, speedKmh,
                                 ear, mar, -5.0f, 0.0f, 0.45f,
@@ -197,9 +255,9 @@ public class DriverMonitorActivity extends AppCompatActivity {
                     public void onError(String error) {
                         // Khi mất mạng/lỗi upload, vẫn đẩy cảnh báo lên MQTT (tự đệm vào SQLite Outbox)
                         AppMqttClient.getInstance().publishSafetyAlert(
-                                AppConfig.DEFAULT_VEHICLE_UUID,
-                                AppConfig.DEFAULT_DRIVER_UUID,
-                                AppConfig.DEFAULT_SHIFT_ID,
+                                targetVehicle,
+                                targetDriver,
+                                targetShift,
                                 "DROWSINESS", "CRITICAL",
                                 lat, lng, speedKmh,
                                 ear, mar, -5.0f, 0.0f, 0.45f,
@@ -224,9 +282,9 @@ public class DriverMonitorActivity extends AppCompatActivity {
                     @Override
                     public void onSuccess(String publicUrl) {
                         AppMqttClient.getInstance().publishSafetyAlert(
-                                AppConfig.DEFAULT_VEHICLE_UUID,
-                                AppConfig.DEFAULT_DRIVER_UUID,
-                                AppConfig.DEFAULT_SHIFT_ID,
+                                targetVehicle,
+                                targetDriver,
+                                targetShift,
                                 "DISTRACTION", "HIGH",
                                 lat, lng, speedKmh,
                                 ear, mar, 0.0f, 30.0f, 0.0f,
@@ -236,9 +294,9 @@ public class DriverMonitorActivity extends AppCompatActivity {
                     @Override
                     public void onError(String error) {
                         AppMqttClient.getInstance().publishSafetyAlert(
-                                AppConfig.DEFAULT_VEHICLE_UUID,
-                                AppConfig.DEFAULT_DRIVER_UUID,
-                                AppConfig.DEFAULT_SHIFT_ID,
+                                targetVehicle,
+                                targetDriver,
+                                targetShift,
                                 "DISTRACTION", "HIGH",
                                 lat, lng, speedKmh,
                                 ear, mar, 0.0f, 30.0f, 0.0f,

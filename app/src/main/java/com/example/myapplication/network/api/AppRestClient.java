@@ -43,10 +43,34 @@ public class AppRestClient {
     private final OkHttpClient httpClient;
     private final Gson gson;
     private final ExecutorService networkExecutor;
+    private volatile String authToken;
 
     public interface ApiCallback<T> {
         void onSuccess(T result);
+
         void onError(String errorMessage);
+    }
+
+    public void setAuthToken(String token) {
+        this.authToken = token;
+        Log.i(TAG, "🔑 Đã thiết lập Auth Token cho AppRestClient"
+                + (token != null ? " (Độ dài: " + token.length() + ")" : " (null)"));
+    }
+
+    public String getAuthToken() {
+        return authToken;
+    }
+
+    public static String buildUrl(String path) {
+        String base = AppConfig.getBaseRestUrl();
+        if (base == null)
+            return path;
+        if (base.endsWith("/") && path != null && path.startsWith("/")) {
+            return base + path.substring(1);
+        } else if (!base.endsWith("/") && path != null && !path.startsWith("/")) {
+            return base + "/" + path;
+        }
+        return base + (path != null ? path : "");
     }
 
     private AppRestClient() {
@@ -94,7 +118,8 @@ public class AppRestClient {
                     @Override
                     public void onFailure(Call call, IOException e) {
                         Log.e(TAG, "Lỗi kết nối verify: " + e.getMessage());
-                        if (callback != null) callback.onError(e.getMessage());
+                        if (callback != null)
+                            callback.onError(e.getMessage());
                     }
 
                     @Override
@@ -103,12 +128,15 @@ public class AppRestClient {
                             if (response.isSuccessful() && response.body() != null) {
                                 String resJson = response.body().string();
                                 VerifyResponseDto dto = gson.fromJson(resJson, VerifyResponseDto.class);
-                                if (callback != null) callback.onSuccess(dto);
+                                if (callback != null)
+                                    callback.onSuccess(dto);
                             } else {
-                                if (callback != null) callback.onError("Server trả mã lỗi: " + response.code());
+                                if (callback != null)
+                                    callback.onError("Server trả mã lỗi: " + response.code());
                             }
                         } catch (Exception e) {
-                            if (callback != null) callback.onError("Lỗi parse phản hồi: " + e.getMessage());
+                            if (callback != null)
+                                callback.onError("Lỗi parse phản hồi: " + e.getMessage());
                         } finally {
                             response.close();
                         }
@@ -116,7 +144,8 @@ public class AppRestClient {
                 });
             } catch (Exception e) {
                 Log.e(TAG, "Lỗi chuẩn bị ảnh verify: " + e.getMessage());
-                if (callback != null) callback.onError(e.getMessage());
+                if (callback != null)
+                    callback.onError(e.getMessage());
             }
         });
     }
@@ -127,12 +156,17 @@ public class AppRestClient {
             try {
                 String jsonStr = gson.toJson(logDto);
                 RequestBody body = RequestBody.create(jsonStr, JSON_MEDIA_TYPE);
-                Request request = new Request.Builder()
-                        .url(AppConfig.getBaseRestUrl() + "/vehicle-logs")
-                        .post(body)
-                        .build();
+                Request.Builder reqBuilder = new Request.Builder()
+                        .url(buildUrl("vehicle-logs"))
+                        .post(body);
 
-                httpClient.newCall(request).enqueue(callback != null ? callback : new DefaultCallback("sendVehicleLog"));
+                if (authToken != null && !authToken.trim().isEmpty()) {
+                    reqBuilder.header("Authorization", "Bearer " + authToken.trim());
+                }
+
+                Request request = reqBuilder.build();
+                httpClient.newCall(request)
+                        .enqueue(callback != null ? callback : new DefaultCallback("sendVehicleLog"));
             } catch (Exception e) {
                 Log.e(TAG, "Lỗi gửi vehicle-log: " + e.getMessage());
             }
@@ -141,7 +175,7 @@ public class AppRestClient {
 
     // ── 3. Gửi Vi Phạm & Bằng Chứng Multipart (POST /violations) ─────────────
     public void sendViolation(long driverId, String violationType, Bitmap evidenceBitmap,
-                              double latitude, double longitude, Callback callback) {
+            double latitude, double longitude, Callback callback) {
         networkExecutor.execute(() -> {
             try {
                 MultipartBody.Builder builder = new MultipartBody.Builder()
@@ -160,16 +194,19 @@ public class AppRestClient {
                     builder.addFormDataPart(
                             "image",
                             "evidence_" + driverId + "_" + System.currentTimeMillis() + ".jpg",
-                            RequestBody.create(jpegBytes, JPEG_MEDIA_TYPE)
-                    );
+                            RequestBody.create(jpegBytes, JPEG_MEDIA_TYPE));
                 }
 
                 RequestBody requestBody = builder.build();
-                Request request = new Request.Builder()
-                        .url(AppConfig.getBaseRestUrl() + "/violations")
-                        .post(requestBody)
-                        .build();
+                Request.Builder reqBuilder = new Request.Builder()
+                        .url(buildUrl("violations"))
+                        .post(requestBody);
 
+                if (authToken != null && !authToken.trim().isEmpty()) {
+                    reqBuilder.header("Authorization", "Bearer " + authToken.trim());
+                }
+
+                Request request = reqBuilder.build();
                 httpClient.newCall(request).enqueue(callback != null ? callback : new DefaultCallback("sendViolation"));
             } catch (Exception e) {
                 Log.e(TAG, "Lỗi gửi violation multipart: " + e.getMessage());
@@ -183,12 +220,17 @@ public class AppRestClient {
             try {
                 String jsonStr = gson.toJson(somnolenceDto);
                 RequestBody body = RequestBody.create(jsonStr, JSON_MEDIA_TYPE);
-                Request request = new Request.Builder()
-                        .url(AppConfig.getBaseRestUrl() + "/somnolence-records")
-                        .post(body)
-                        .build();
+                Request.Builder reqBuilder = new Request.Builder()
+                        .url(buildUrl("somnolence-records"))
+                        .post(body);
 
-                httpClient.newCall(request).enqueue(callback != null ? callback : new DefaultCallback("sendSomnolenceRecord"));
+                if (authToken != null && !authToken.trim().isEmpty()) {
+                    reqBuilder.header("Authorization", "Bearer " + authToken.trim());
+                }
+
+                Request request = reqBuilder.build();
+                httpClient.newCall(request)
+                        .enqueue(callback != null ? callback : new DefaultCallback("sendSomnolenceRecord"));
             } catch (Exception e) {
                 Log.e(TAG, "Lỗi gửi somnolence-record: " + e.getMessage());
             }
@@ -197,16 +239,20 @@ public class AppRestClient {
 
     public interface SnapshotUploadCallback {
         void onSuccess(String publicUrl);
+
         void onError(String error);
     }
 
     /**
-     * Tải ảnh snapshot bằng chứng vi phạm trực tiếp lên Backend /api/v1/media/upload (Multipart),
-     * sau đó Backend lưu trữ lên MinIO S3 an toàn, không lo lỗi sai lệch AWSv4 Host signature.
+     * Tải ảnh snapshot bằng chứng vi phạm trực tiếp lên Backend
+     * /api/v1/media/upload (Multipart),
+     * sau đó Backend lưu trữ lên MinIO S3 an toàn, không lo lỗi sai lệch AWSv4 Host
+     * signature.
      */
     public void uploadSnapshotToMinio(Bitmap bitmap, SnapshotUploadCallback callback) {
         if (bitmap == null || bitmap.isRecycled()) {
-            if (callback != null) callback.onError("Bitmap null hoặc đã bị recycled");
+            if (callback != null)
+                callback.onError("Bitmap null hoặc đã bị recycled");
             return;
         }
 
@@ -225,11 +271,15 @@ public class AppRestClient {
                         .addFormDataPart("folder", "snapshots")
                         .build();
 
-                Request uploadReq = new Request.Builder()
-                        .url(AppConfig.getBaseRestUrl() + "/api/v1/media/upload")
-                        .post(multipartBody)
-                        .build();
+                Request.Builder reqBuilder = new Request.Builder()
+                        .url(buildUrl("api/v1/media/upload"))
+                        .post(multipartBody);
 
+                if (authToken != null && !authToken.trim().isEmpty()) {
+                    reqBuilder.header("Authorization", "Bearer " + authToken.trim());
+                }
+
+                Request uploadReq = reqBuilder.build();
                 Response uploadRes = httpClient.newCall(uploadReq).execute();
                 if (uploadRes.isSuccessful() && uploadRes.body() != null) {
                     String resJson = uploadRes.body().string();
@@ -240,16 +290,20 @@ public class AppRestClient {
                     String publicUrl = data.has("public_url") ? data.get("public_url").getAsString() : "";
 
                     Log.i(TAG, "📸 [Upload Snapshot Thành công] URL: " + publicUrl);
-                    if (callback != null) callback.onSuccess(publicUrl);
+                    if (callback != null)
+                        callback.onSuccess(publicUrl);
                 } else {
                     int code = uploadRes != null ? uploadRes.code() : -1;
-                    if (uploadRes != null) uploadRes.close();
+                    if (uploadRes != null)
+                        uploadRes.close();
                     Log.w(TAG, "❌ Lỗi POST /api/v1/media/upload: code " + code);
-                    if (callback != null) callback.onError("Upload code " + code);
+                    if (callback != null)
+                        callback.onError("Upload code " + code);
                 }
             } catch (Exception e) {
                 Log.e(TAG, "❌ Lỗi uploadSnapshotToMinio: " + e.getMessage());
-                if (callback != null) callback.onError(e.getMessage());
+                if (callback != null)
+                    callback.onError(e.getMessage());
             }
         });
     }

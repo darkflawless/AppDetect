@@ -45,10 +45,12 @@ public class LocationTrackingService extends Service {
 
     public static final String ACTION_START = "ACTION_START_LOCATION_SERVICE";
     public static final String ACTION_STOP = "ACTION_STOP_LOCATION_SERVICE";
+    public static final String EXTRA_VEHICLE_ID = "EXTRA_VEHICLE_ID";
 
     private FusedLocationProviderClient fusedLocationClient;
     private LocationCallback locationCallback;
     private boolean isTracking = false;
+    private String currentVehicleId = null;
 
     public static volatile Location lastKnownLocation;
 
@@ -65,8 +67,15 @@ public class LocationTrackingService extends Service {
     }
 
     public static void start(Context context) {
+        start(context, null);
+    }
+
+    public static void start(Context context, String vehicleId) {
         Intent intent = new Intent(context, LocationTrackingService.class);
         intent.setAction(ACTION_START);
+        if (vehicleId != null) {
+            intent.putExtra(EXTRA_VEHICLE_ID, vehicleId);
+        }
         ContextCompat.startForegroundService(context, intent);
     }
 
@@ -95,12 +104,17 @@ public class LocationTrackingService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && intent.getAction() != null) {
-            String action = intent.getAction();
-            if (ACTION_START.equals(action)) {
-                startForegroundTracking();
-            } else if (ACTION_STOP.equals(action)) {
-                stopForegroundTracking();
+        if (intent != null) {
+            if (intent.hasExtra(EXTRA_VEHICLE_ID)) {
+                this.currentVehicleId = intent.getStringExtra(EXTRA_VEHICLE_ID);
+            }
+            if (intent.getAction() != null) {
+                String action = intent.getAction();
+                if (ACTION_START.equals(action)) {
+                    startForegroundTracking();
+                } else if (ACTION_STOP.equals(action)) {
+                    stopForegroundTracking();
+                }
             }
         }
         return START_STICKY;
@@ -167,11 +181,14 @@ public class LocationTrackingService extends Service {
         float speedKmh = speedMps * 3.6f;
         Log.d(TAG, String.format("📍 GPS: Lat=%.6f, Lng=%.6f, Speed=%.1f km/h", lat, lng, speedKmh));
 
+        String targetVehicle = (currentVehicleId != null && !currentVehicleId.trim().isEmpty())
+                ? currentVehicleId : AppConfig.DEFAULT_VEHICLE_UUID;
+
         // 1. Giao thức mới: Publish MQTT Telemetry QoS 0
-        AppMqttClient.getInstance().publishTelemetry(AppConfig.DEFAULT_VEHICLE_UUID, lat, lng, speedKmh);
+        AppMqttClient.getInstance().publishTelemetry(targetVehicle, lat, lng, speedKmh);
 
         // 2. Gửi REST API phụ trợ
-        VehicleLogDto dto = new VehicleLogDto(AppConfig.DEFAULT_DRIVER_ID, AppConfig.DEFAULT_VEHICLE_ID, lat, lng, speedMps);
+        VehicleLogDto dto = new VehicleLogDto(AppConfig.DEFAULT_DRIVER_ID, targetVehicle, lat, lng, speedMps);
         AppRestClient.getInstance().sendVehicleLog(dto, null);
     }
 

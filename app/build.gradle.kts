@@ -11,9 +11,19 @@ val localProperties = Properties().apply {
     }
 }
 
-val serverIp: String = System.getenv("SERVER_IP")
-    ?: localProperties.getProperty("server.ip")
-    ?: "192.168.112.72"
+fun getProp(key: String, defaultVal: String): String {
+    return System.getenv(key.replace('.', '_').uppercase())
+        ?: (project.findProperty(key) as? String)
+        ?: localProperties.getProperty(key)
+        ?: defaultVal
+}
+
+val serverIp: String = getProp("server.ip", "192.168.1.11")
+val serverRestPort: Int = getProp("server.rest_port", "8080").toIntOrNull() ?: 8080
+val serverWsPort: Int = getProp("server.ws_port", "8080").toIntOrNull() ?: 8080
+val serverMqttPort: Int = getProp("server.mqtt_port", "1883").toIntOrNull() ?: 1883
+val serverUdpPort: Int = getProp("server.udp_port", "9090").toIntOrNull() ?: 9090
+val serverMediaPort: Int = getProp("server.media_port", "9000").toIntOrNull() ?: 9000
 
 android {
     namespace = "com.example.myapplication"
@@ -33,6 +43,11 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "SERVER_IP", "\"$serverIp\"")
+        buildConfigField("int", "REST_PORT", "$serverRestPort")
+        buildConfigField("int", "WS_PORT", "$serverWsPort")
+        buildConfigField("int", "MQTT_PORT", "$serverMqttPort")
+        buildConfigField("int", "UDP_PORT", "$serverUdpPort")
+        buildConfigField("int", "MEDIA_PORT", "$serverMediaPort")
     }
 
     buildTypes {
@@ -95,8 +110,15 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
     implementation(libs.gson)
+    // Retrofit for API calls
+    implementation("com.squareup.retrofit2:retrofit:2.9.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
+    // AndroidX Security Crypto for encrypted shared preferences
+    implementation("androidx.security:security-crypto:1.1.0-alpha03")
     // MQTT Client
     implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
+    // Glide for image loading
+    implementation("com.github.bumptech.glide:glide:4.16.0")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.espresso.core)
