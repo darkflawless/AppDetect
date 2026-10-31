@@ -382,9 +382,16 @@ public class DrowsinessDetector {
 
             // Bước 9: Quyết định trạng thái buồn ngủ bằng mô hình AI BiLSTM kết hợp bộ đếm
             // thời gian (1.0 giây)
-            // Đồng bộ 100% logic với AI-ThamKhao test_cam.py: Đủ 1.0s mới hú còi, mở mắt là
-            // tắt ngay tức thì
-            boolean isCurrentlyDrowsy = (result.drowsinessScore >= DROWSINESS_THRESHOLD) && !isDistractedTurn;
+            // Cơ chế kép (Hybrid): AI score >= 58% HOẶC EAR < 0.15 (mắt nhắm vật lý)
+            // → Giải quyết trường hợp model LSTM chưa nhận dạng được khi mắt nhắm liên tục
+            // nhưng EAR đã phản ánh chính xác trạng thái nhắm mắt thực tế
+            // boolean earClosed = result.ear < 0.15f; // EAR < 0.15 = mắt nhắm hoàn toàn
+            // boolean isCurrentlyDrowsy = ((result.drowsinessScore >= DROWSINESS_THRESHOLD)
+            // || earClosed)
+            // && !isDistractedTurn;
+
+            boolean isCurrentlyDrowsy = ((result.drowsinessScore >= DROWSINESS_THRESHOLD))
+                    && !isDistractedTurn;
 
             if (isCurrentlyDrowsy) {
                 if (firstDrowsyTime == 0) {

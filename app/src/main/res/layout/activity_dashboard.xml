@@ -240,142 +240,82 @@
             </LinearLayout>
 
             <!-- TIÊU ĐỀ: LỊCH PHÂN CÔNG HÔM NAY -->
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="LỊCH PHÂN CÔNG HÔM NAY"
-                android:textSize="13sp"
-                android:textStyle="bold"
-                android:textColor="@color/text_title"
-                android:layout_marginBottom="8dp" />
-
-            <!-- Lịch phân công Item 1 (Sắp chạy + nút bắt đầu) -->
-            <androidx.cardview.widget.CardView
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:cardCornerRadius="12dp"
-                app:cardElevation="2dp"
-                app:cardBackgroundColor="@color/white"
-                android:layout_marginBottom="10dp">
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="8dp">
 
-                <LinearLayout
-                    android:layout_width="match_parent"
+                <TextView
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="14dp">
+                    android:layout_weight="1"
+                    android:text="LỊCH PHÂN CÔNG HÔM NAY"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/text_title" />
 
-                    <!-- Hàng giờ + trạng thái -->
-                    <LinearLayout
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical">
+                <TextView
+                    android:id="@+id/btn_refresh_schedule"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Làm mới"
+                    android:textSize="12sp"
+                    android:textColor="@color/primary"
+                    android:padding="4dp"
+                    android:clickable="true"
+                    android:focusable="true" />
+            </LinearLayout>
 
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="&#128338; 08:00 - 10:00  |  "
-                            android:textSize="13sp"
-                            android:textStyle="bold"
-                            android:textColor="@color/text_main" />
+            <!-- Loading indicator -->
+            <ProgressBar
+                android:id="@+id/pb_schedule_loading"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_gravity="center"
+                android:visibility="gone"
+                android:layout_margin="12dp" />
 
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="&#9679; Sắp chạy"
-                            android:textSize="13sp"
-                            android:textStyle="bold"
-                            android:textColor="@color/blue_dot" />
-                    </LinearLayout>
+            <!-- Container danh sách lịch phân công động từ API -->
+            <LinearLayout
+                android:id="@+id/ll_schedule_container"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
 
-                    <!-- Điểm đi -->
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Điểm đi: 123 Phố Huế, Hà Nội"
-                        android:textSize="12sp"
-                        android:textColor="@color/text_secondary"
-                        android:layout_marginTop="6dp" />
-
-                    <!-- Điểm đến -->
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Điểm đến: Bến xe Mỹ Đình, Hà Nội"
-                        android:textSize="12sp"
-                        android:textColor="@color/text_secondary"
-                        android:layout_marginTop="2dp" />
-
-                    <!-- Nút Bắt đầu chuyến đi -->
-                    <Button
-                        android:id="@+id/btn_start_trip"
-                        android:layout_width="match_parent"
-                        android:layout_height="40dp"
-                        android:background="@drawable/bg_btn_start_trip"
-                        android:text="Bắt đầu chuyến đi"
-                        android:textColor="@color/white"
-                        android:textSize="13sp"
-                        android:textStyle="bold"
-                        android:layout_marginTop="10dp" />
-                </LinearLayout>
-            </androidx.cardview.widget.CardView>
-
-            <!-- Lịch phân công Item 2 (Chờ nhận) -->
+            <!-- Thông báo khi chưa có phân công nào hôm nay -->
             <androidx.cardview.widget.CardView
+                android:id="@+id/cv_empty_schedule"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 app:cardCornerRadius="12dp"
-                app:cardElevation="2dp"
+                app:cardElevation="1dp"
                 app:cardBackgroundColor="@color/white"
+                android:visibility="gone"
                 android:layout_marginBottom="16dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:padding="14dp">
+                    android:gravity="center"
+                    android:padding="20dp">
 
-                    <!-- Hàng giờ + trạng thái -->
-                    <LinearLayout
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="&#128338; 14:00 - 16:30  |  "
-                            android:textSize="13sp"
-                            android:textStyle="bold"
-                            android:textColor="@color/text_main" />
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="&#9675; Chờ nhận"
-                            android:textSize="13sp"
-                            android:textStyle="bold"
-                            android:textColor="@color/text_secondary" />
-                    </LinearLayout>
-
-                    <!-- Điểm đi -->
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Điểm đi: Bến xe Mỹ Đình"
-                        android:textSize="12sp"
-                        android:textColor="@color/text_secondary"
-                        android:layout_marginTop="6dp" />
+                        android:text="&#128197;"
+                        android:textSize="30sp" />
 
-                    <!-- Điểm đến -->
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Điểm đến: Sân bay Nội Bài"
-                        android:textSize="12sp"
+                        android:text="Hôm nay bạn chưa có lịch phân công nào"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
                         android:textColor="@color/text_secondary"
-                        android:layout_marginTop="2dp" />
+                        android:layout_marginTop="8dp" />
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 
