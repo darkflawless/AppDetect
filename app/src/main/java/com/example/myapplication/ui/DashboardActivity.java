@@ -2,6 +2,7 @@ package com.example.myapplication.ui;
 
 import android.content.Intent;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.Button;
@@ -32,6 +33,8 @@ import retrofit2.Callback;
 import retrofit2.Response;
 
 public class DashboardActivity extends AppCompatActivity {
+
+    private static final String TAG = "DashboardActivity";
 
     private TextView tvDashGreeting;
     private TextView tvDashDriverCode;
@@ -126,14 +129,20 @@ public class DashboardActivity extends AppCompatActivity {
             finish();
         });
 
+        // Mở màn hình Lịch sử chuyến đi
+        View.OnClickListener openHistoryListener = v -> {
+            Intent intent = new Intent(DashboardActivity.this, TripHistoryActivity.class);
+            startActivity(intent);
+        };
+        if (btnMenuHistory != null) btnMenuHistory.setOnClickListener(openHistoryListener);
+        if (tabHistory != null) tabHistory.setOnClickListener(openHistoryListener);
+
         // Placeholder cho các chức năng đang hoàn thiện
         View.OnClickListener placeholder = v ->
                 Toast.makeText(DashboardActivity.this, "Chức năng đang phát triển", Toast.LENGTH_SHORT).show();
 
         if (btnMenuEditProfile != null) btnMenuEditProfile.setOnClickListener(placeholder);
-        if (btnMenuHistory != null) btnMenuHistory.setOnClickListener(placeholder);
         if (tabSchedule != null) tabSchedule.setOnClickListener(v -> loadTodaySchedule(tokenManager));
-        if (tabHistory != null) tabHistory.setOnClickListener(placeholder);
         if (btnMenu != null) btnMenu.setOnClickListener(placeholder);
         if (btnNotification != null) btnNotification.setOnClickListener(placeholder);
     }
@@ -161,6 +170,7 @@ public class DashboardActivity extends AppCompatActivity {
     private void loadTodaySchedule(SecureTokenManager tokenManager) {
         String token = tokenManager.getToken();
         if (token == null || token.isEmpty()) {
+            Log.w(TAG, "Không thể tải lịch: token null hoặc rỗng");
             showEmptySchedule();
             return;
         }
@@ -170,16 +180,21 @@ public class DashboardActivity extends AppCompatActivity {
         if (pbScheduleLoading != null) pbScheduleLoading.setVisibility(View.VISIBLE);
         if (cvEmptySchedule != null) cvEmptySchedule.setVisibility(View.GONE);
 
+        Log.i(TAG, "Đang gọi API lấy lịch hôm nay: GET /assignments/me/today");
         ApiService api = RetrofitClient.getApiService();
         api.getTodayAssignments("Bearer " + token).enqueue(new Callback<AssignmentListResponse>() {
             @Override
             public void onResponse(Call<AssignmentListResponse> call, Response<AssignmentListResponse> response) {
                 if (pbScheduleLoading != null) pbScheduleLoading.setVisibility(View.GONE);
 
+                Log.i(TAG, "Kết quả /assignments/me/today: HTTP " + response.code());
                 if (response.isSuccessful() && response.body() != null && response.body().isSuccess()) {
                     List<AssignmentListResponse.AssignmentItem> items = response.body().getData();
+                    Log.i(TAG, "Số lượng chuyến hôm nay nhận được: " + (items != null ? items.size() : 0));
                     renderScheduleList(items);
                 } else {
+                    String errorMsg = (response.body() != null) ? response.body().getMessage() : "HTTP " + response.code();
+                    Log.w(TAG, "API /assignments/me/today thất bại (" + errorMsg + "). Thử gọi qua driverId...");
                     // Fallback thử gọi qua driverId nếu /assignments/me/today chưa khả dụng
                     String driverId = tokenManager.getDriverId();
                     if (driverId != null && !driverId.isEmpty()) {
@@ -193,6 +208,7 @@ public class DashboardActivity extends AppCompatActivity {
             @Override
             public void onFailure(Call<AssignmentListResponse> call, Throwable t) {
                 if (pbScheduleLoading != null) pbScheduleLoading.setVisibility(View.GONE);
+                Log.e(TAG, "Lỗi mạng hoặc parse JSON khi gọi /assignments/me/today: " + t.getMessage(), t);
                 // Fallback thử gọi qua driverId
                 String driverId = tokenManager.getDriverId();
                 if (driverId != null && !driverId.isEmpty()) {
@@ -205,19 +221,25 @@ public class DashboardActivity extends AppCompatActivity {
     }
 
     private void loadTodayScheduleByDriverId(String token, String driverId) {
+        Log.i(TAG, "Đang gọi API dự phòng: GET /assignments/driver/" + driverId + "/today");
         ApiService api = RetrofitClient.getApiService();
         api.getTodayAssignmentsByDriver("Bearer " + token, driverId).enqueue(new Callback<AssignmentListResponse>() {
             @Override
             public void onResponse(Call<AssignmentListResponse> call, Response<AssignmentListResponse> response) {
+                Log.i(TAG, "Kết quả /assignments/driver/{id}/today: HTTP " + response.code());
                 if (response.isSuccessful() && response.body() != null && response.body().isSuccess()) {
-                    renderScheduleList(response.body().getData());
+                    List<AssignmentListResponse.AssignmentItem> items = response.body().getData();
+                    Log.i(TAG, "Số lượng chuyến dự phòng nhận được: " + (items != null ? items.size() : 0));
+                    renderScheduleList(items);
                 } else {
+                    Log.w(TAG, "API dự phòng thất bại.");
                     showEmptySchedule();
                 }
             }
 
             @Override
             public void onFailure(Call<AssignmentListResponse> call, Throwable t) {
+                Log.e(TAG, "Lỗi API dự phòng: " + t.getMessage(), t);
                 showEmptySchedule();
             }
         });

@@ -20,7 +20,7 @@ public class DriverProfileActivity extends AppCompatActivity {
 
     private TextView tvDriverName, tvDriverId, tvDriverPhone, tvDriverEmail;
     private TextView tvDriverDob, tvDriverGender, tvDriverHireDate, tvDriverAddress;
-    private TextView tvActiveStatus, tvAccessToken;
+    private TextView tvActiveStatus;
     private android.widget.ImageView ivDriverAvatar;
     private View btnBack;
 
@@ -39,7 +39,6 @@ public class DriverProfileActivity extends AppCompatActivity {
         tvDriverHireDate = findViewById(R.id.tv_driver_hire_date);
         tvDriverAddress  = findViewById(R.id.tv_driver_address);
         tvActiveStatus   = findViewById(R.id.tv_active_status);
-        tvAccessToken    = findViewById(R.id.tv_access_token);
         ivDriverAvatar   = findViewById(R.id.iv_driver_avatar);
         btnBack          = findViewById(R.id.btn_back);
 
@@ -53,11 +52,6 @@ public class DriverProfileActivity extends AppCompatActivity {
 
         if (savedDriverId != null && !savedDriverId.isEmpty()) {
             tvDriverId.setText(savedDriverId);
-        }
-        if (token != null && !token.isEmpty()) {
-            tvAccessToken.setText(token);
-        } else {
-            tvAccessToken.setText("Chưa có token");
         }
 
         if (token == null || token.isEmpty()) {

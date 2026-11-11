@@ -101,6 +101,7 @@
             android:layout_height="wrap_content"
             android:layout_marginHorizontal="14dp"
             android:layout_marginTop="14dp"
+            android:layout_marginBottom="24dp"
             app:cardCornerRadius="14dp"
             app:cardElevation="3dp"
             app:cardBackgroundColor="@color/white">
@@ -286,44 +287,6 @@
                         android:textColor="@color/text_main" />
                 </LinearLayout>
 
-            </LinearLayout>
-        </androidx.cardview.widget.CardView>
-
-        <!-- Thẻ Token Session -->
-        <androidx.cardview.widget.CardView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginHorizontal="14dp"
-            android:layout_marginTop="14dp"
-            android:layout_marginBottom="24dp"
-            app:cardCornerRadius="14dp"
-            app:cardElevation="3dp"
-            app:cardBackgroundColor="@color/white">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="16dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Phiên đăng nhập (Bearer Token)"
-                    android:textSize="14sp"
-                    android:textStyle="bold"
-                    android:textColor="@color/dash_green_header"
-                    android:layout_marginBottom="8dp" />
-
-                <TextView
-                    android:id="@+id/tv_access_token"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="---"
-                    android:textSize="11sp"
-                    android:textColor="@color/text_secondary"
-                    android:maxLines="3"
-                    android:ellipsize="end" />
             </LinearLayout>
         </androidx.cardview.widget.CardView>
 
