@@ -27,4 +27,15 @@ public interface ApiService {
     Call<AssignmentListResponse> getTodayAssignmentsByDriver(
             @Header("Authorization") String bearerToken,
             @Path("driverId") String driverId);
+
+    @GET("assignments/me/history")
+    Call<AssignmentListResponse> getTripHistory(
+            @Header("Authorization") String bearerToken,
+            @Query("status") String status);
+
+    @GET("assignments/driver/{driverId}/history")
+    Call<AssignmentListResponse> getTripHistoryByDriver(
+            @Header("Authorization") String bearerToken,
+            @Path("driverId") String driverId,
+            @Query("status") String status);
 }

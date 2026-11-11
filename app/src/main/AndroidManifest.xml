@@ -52,6 +52,12 @@
             android:exported="false"
             android:screenOrientation="portrait" />
 
+        <!-- Màn hình Lịch sử chuyến đi -->
+        <activity
+            android:name=".ui.TripHistoryActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
 
         <!-- Màn hình xác thực tài xế -->
         <activity
