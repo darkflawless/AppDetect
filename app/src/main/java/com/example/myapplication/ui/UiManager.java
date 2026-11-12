@@ -32,6 +32,8 @@ public class UiManager {
     public final TextView confidenceText;
     public final TextView fpsText;
     public final ImageButton btnSwitchCamera;
+    public final Button btnEndTrip;
+    public final Button btnReportIncident;
     public final LinearLayout startOverlay;
     public final Button btnStartTrip;
     private final AlertSoundManager alertSoundManager;
@@ -48,6 +50,8 @@ public class UiManager {
         confidenceText = activity.findViewById(R.id.confidence_text);
         fpsText = activity.findViewById(R.id.fps_text);
         btnSwitchCamera = activity.findViewById(R.id.btn_switch_camera);
+        btnEndTrip = activity.findViewById(R.id.btn_end_trip);
+        btnReportIncident = activity.findViewById(R.id.btn_report_incident);
         startOverlay = activity.findViewById(R.id.start_overlay);
         btnStartTrip = activity.findViewById(R.id.btn_start_trip);
     }
@@ -64,7 +68,7 @@ public class UiManager {
     }
 
     public void updateUI(List<Detection> detections, DrowsinessDetector.DrowsinessResult dResult,
-                         float fps, int imgW, int imgH) {
+            float fps, int imgW, int imgH) {
         fpsText.setText(String.format("%.1f FPS", fps));
         bboxOverlay.setDetections(detections, imgW, imgH);
 

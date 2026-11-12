@@ -20,10 +20,12 @@ import com.bumptech.glide.Glide;
 import com.example.myapplication.R;
 import com.example.myapplication.data.model.AssignmentListResponse;
 import com.example.myapplication.data.model.DriverMeResponse;
+import com.example.myapplication.data.model.TripActionResponse;
 import com.example.myapplication.network.api.ApiService;
 import com.example.myapplication.network.api.AppRestClient;
 import com.example.myapplication.network.api.RetrofitClient;
 import com.example.myapplication.utils.AppConfig;
+import com.example.myapplication.utils.IncidentReportHelper;
 import com.example.myapplication.utils.SecureTokenManager;
 
 import java.util.List;
@@ -270,6 +272,7 @@ public class DashboardActivity extends AppCompatActivity {
             TextView tvEnd          = card.findViewById(R.id.tv_item_end_location);
             TextView tvDistance     = card.findViewById(R.id.tv_item_distance);
             Button btnStart         = card.findViewById(R.id.btn_item_start_trip);
+            Button btnReportIncident = card.findViewById(R.id.btn_item_report_incident);
 
             // 1. Giờ chạy
             String timeText = formatTripTime(item);
@@ -312,26 +315,34 @@ public class DashboardActivity extends AppCompatActivity {
                 tvDistance.setVisibility(View.GONE);
             }
 
-            // 6. Xử lý nút bấm "Bắt đầu chuyến đi"
+            // 6. Xử lý nút bấm "Bắt đầu chuyến đi" & "Báo sự cố"
             String status = item.getStatus() != null ? item.getStatus().toUpperCase() : "PLANNED";
             if ("COMPLETED".equals(status)) {
                 btnStart.setText("Chuyến đi đã hoàn thành");
                 btnStart.setEnabled(false);
                 btnStart.setBackgroundColor(ContextCompat.getColor(this, R.color.text_secondary));
+                if (btnReportIncident != null) btnReportIncident.setVisibility(View.GONE);
             } else if ("CANCELLED".equals(status)) {
                 btnStart.setText("Chuyến đi đã hủy");
                 btnStart.setEnabled(false);
                 btnStart.setBackgroundColor(ContextCompat.getColor(this, R.color.text_secondary));
+                if (btnReportIncident != null) btnReportIncident.setVisibility(View.GONE);
             } else if ("IN_PROGRESS".equals(status)) {
-                btnStart.setText("Vào buồng lái giám sát");
+                btnStart.setText("Tiếp tục chuyến đi");
                 btnStart.setEnabled(true);
                 btnStart.setBackgroundResource(R.drawable.bg_btn_start_trip);
                 btnStart.setOnClickListener(v -> startTripFlow(item));
+                if (btnReportIncident != null) {
+                    btnReportIncident.setVisibility(View.VISIBLE);
+                    btnReportIncident.setOnClickListener(v ->
+                            IncidentReportHelper.showReportDialog(this, item.getTripId(), null));
+                }
             } else {
                 btnStart.setText("Bắt đầu chuyến đi");
                 btnStart.setEnabled(true);
                 btnStart.setBackgroundResource(R.drawable.bg_btn_start_trip);
-                btnStart.setOnClickListener(v -> startTripFlow(item));
+                btnStart.setOnClickListener(v -> handleStartTrip(item));
+                if (btnReportIncident != null) btnReportIncident.setVisibility(View.GONE);
             }
 
             llScheduleContainer.addView(card);
@@ -344,12 +355,46 @@ public class DashboardActivity extends AppCompatActivity {
     }
 
     /**
-     * Chuyển thẳng sang màn hình giám sát buồng lái (DriverMonitorActivity) khi bấm bắt đầu chuyến
-     * (Tạm thời bỏ qua bước xác thực khuôn mặt DriverVerifyActivity để test trước tính năng)
+     * Bắt đầu chuyến đi: Gọi API backend đổi trạng thái sang IN_PROGRESS, sau đó mở buồng lái
+     */
+    private void handleStartTrip(AssignmentListResponse.AssignmentItem item) {
+        if (item == null || item.getTripId() == null || item.getTripId().trim().isEmpty()) {
+            startTripFlow(item);
+            return;
+        }
+
+        SecureTokenManager tokenManager = SecureTokenManager.getInstance(getApplicationContext());
+        String token = tokenManager.getToken();
+        if (token == null || token.isEmpty()) {
+            startTripFlow(item);
+            return;
+        }
+
+        Toast.makeText(this, "Đang khởi động chuyến đi...", Toast.LENGTH_SHORT).show();
+        ApiService api = RetrofitClient.getApiService();
+        api.startTrip("Bearer " + token, item.getTripId().trim()).enqueue(new Callback<TripActionResponse>() {
+            @Override
+            public void onResponse(Call<TripActionResponse> call, Response<TripActionResponse> response) {
+                if (response.isSuccessful()) {
+                    Log.i(TAG, "Đã cập nhật trạng thái chuyến sang IN_PROGRESS trên server");
+                } else {
+                    Log.w(TAG, "startTrip response HTTP: " + response.code());
+                }
+                startTripFlow(item);
+            }
+
+            @Override
+            public void onFailure(Call<TripActionResponse> call, Throwable t) {
+                Log.e(TAG, "Lỗi kết nối khi gọi startTrip: " + t.getMessage());
+                startTripFlow(item);
+            }
+        });
+    }
+
+    /**
+     * Chuyển thẳng sang màn hình giám sát buồng lái (DriverMonitorActivity) khi bấm bắt đầu/tiếp tục chuyến
      */
     private void startTripFlow(AssignmentListResponse.AssignmentItem item) {
-        // Tạm thời comment luồng xác thực:
-        // Intent intent = new Intent(DashboardActivity.this, DriverVerifyActivity.class);
         Intent intent = new Intent(DashboardActivity.this, DriverMonitorActivity.class);
         if (item != null) {
             if (item.getTripId() != null) intent.putExtra("TRIP_ID", item.getTripId());
