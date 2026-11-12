@@ -54,10 +54,38 @@
             android:id="@+id/fps_text"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginEnd="16dp"
+            android:layout_marginEnd="8dp"
             android:text="-- FPS"
             android:textColor="#AAFFFFFF"
-            android:textSize="13sp" />
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/btn_report_incident"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/bg_btn_incident"
+            android:text="⚠️ Sự cố"
+            android:textColor="#FFFFFF"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:paddingHorizontal="10dp"
+            android:minHeight="0dp"
+            android:minWidth="0dp" />
+
+        <Button
+            android:id="@+id/btn_end_trip"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:layout_marginEnd="10dp"
+            android:background="@drawable/bg_btn_end_trip"
+            android:text="Kết thúc"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:paddingHorizontal="12dp"
+            android:minHeight="0dp"
+            android:minWidth="0dp" />
 
         <ImageButton
             android:id="@+id/btn_switch_camera"

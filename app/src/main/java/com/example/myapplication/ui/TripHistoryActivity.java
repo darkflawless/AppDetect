@@ -69,6 +69,12 @@ public class TripHistoryActivity extends AppCompatActivity {
         loadHistory();
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        loadHistory();
+    }
+
     private void setupFilters() {
         if (filterAll != null) {
             filterAll.setOnClickListener(v -> {
@@ -248,6 +254,11 @@ public class TripHistoryActivity extends AppCompatActivity {
                 btnAction.setText("Chuyến đi đã hủy");
                 btnAction.setEnabled(false);
                 btnAction.setBackgroundColor(ContextCompat.getColor(this, R.color.text_secondary));
+            } else if ("IN_PROGRESS".equals(status)) {
+                btnAction.setText("Tiếp tục chuyến đi");
+                btnAction.setEnabled(true);
+                btnAction.setBackgroundResource(R.drawable.bg_btn_start_trip);
+                btnAction.setOnClickListener(v -> startTripFlow(item));
             } else {
                 btnAction.setVisibility(View.GONE);
             }

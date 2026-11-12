@@ -82,16 +82,36 @@
             android:layout_marginTop="2dp"
             android:visibility="gone" />
 
-        <!-- Nút Bắt đầu chuyến đi / Vào giám sát -->
-        <Button
-            android:id="@+id/btn_item_start_trip"
+        <!-- Nút Bắt đầu chuyến đi / Vào giám sát & Báo sự cố -->
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="40dp"
-            android:background="@drawable/bg_btn_start_trip"
-            android:text="Bắt đầu chuyến đi"
-            android:textColor="@color/white"
-            android:textSize="13sp"
-            android:textStyle="bold"
-            android:layout_marginTop="10dp" />
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="10dp">
+
+            <Button
+                android:id="@+id/btn_item_start_trip"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_btn_start_trip"
+                android:text="Bắt đầu chuyến đi"
+                android:textColor="@color/white"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btn_item_report_incident"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_btn_incident"
+                android:text="⚠️ Báo sự cố"
+                android:textColor="@color/white"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:paddingHorizontal="12dp"
+                android:visibility="gone" />
+        </LinearLayout>
     </LinearLayout>
 </androidx.cardview.widget.CardView>

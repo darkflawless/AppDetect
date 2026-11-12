@@ -10,6 +10,7 @@ import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 
@@ -19,14 +20,21 @@ import com.example.myapplication.ai.DetectionPipeline;
 import com.example.myapplication.ai.DrowsinessDetector;
 import com.example.myapplication.camera.CameraManager;
 import com.example.myapplication.data.model.SomnolenceRecordDto;
+import com.example.myapplication.data.model.TripActionResponse;
+import com.example.myapplication.network.api.ApiService;
 import com.example.myapplication.network.api.AppRestClient;
+import com.example.myapplication.network.api.RetrofitClient;
 import com.example.myapplication.network.stream.UdpFrameSender;
 import com.example.myapplication.network.websocket.AppWebSocketClient;
 import com.example.myapplication.network.mqtt.AppMqttClient;
 import android.location.Location;
 import com.example.myapplication.service.LocationTrackingService;
 import com.example.myapplication.utils.AppConfig;
+import com.example.myapplication.utils.IncidentReportHelper;
 import com.example.myapplication.utils.SecureTokenManager;
+import retrofit2.Call;
+import retrofit2.Callback;
+import retrofit2.Response;
 
 import java.util.List;
 
@@ -89,7 +97,8 @@ public class DriverMonitorActivity extends AppCompatActivity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setContentView(R.layout.activity_main);
 
-        // 2. Trích xuất thông tin chuyến đi từ Intent & thông tin tài xế từ TokenManager
+        // 2. Trích xuất thông tin chuyến đi từ Intent & thông tin tài xế từ
+        // TokenManager
         tripId = getIntent().getStringExtra("TRIP_ID");
         vehicleId = getIntent().getStringExtra("VEHICLE_ID");
         vehiclePlate = getIntent().getStringExtra("VEHICLE_PLATE");
@@ -101,7 +110,8 @@ public class DriverMonitorActivity extends AppCompatActivity {
             AppRestClient.getInstance().setAuthToken(token);
         }
 
-        Log.i(TAG, "🚀 Giám sát chuyến: tripId=" + tripId + ", vehicleId=" + vehicleId + ", plate=" + vehiclePlate + ", driverId=" + driverId);
+        Log.i(TAG, "🚀 Giám sát chuyến: tripId=" + tripId + ", vehicleId=" + vehicleId + ", plate=" + vehiclePlate
+                + ", driverId=" + driverId);
 
         // 3. Khởi tạo UI & Camera Modules
         uiManager = new UiManager(this);
@@ -114,9 +124,15 @@ public class DriverMonitorActivity extends AppCompatActivity {
             }
         });
 
+        uiManager.btnEndTrip.setOnClickListener(v -> handleEndTrip());
+        uiManager.btnReportIncident.setOnClickListener(v -> IncidentReportHelper.showReportDialog(this, tripId, null));
+
         uiManager.btnStartTrip.setOnClickListener(v -> {
             isTripStarted = true;
             uiManager.startOverlay.setVisibility(android.view.View.GONE);
+            if (tripId != null && !tripId.isEmpty()) {
+                callApiStartTrip(tripId);
+            }
             checkAndStartServices();
         });
 
@@ -238,32 +254,33 @@ public class DriverMonitorActivity extends AppCompatActivity {
                 float mar = dResult.mar;
 
                 // Upload ảnh snapshot trực tiếp lên MinIO S3 qua Presigned URL
-                AppRestClient.getInstance().uploadSnapshotToMinio(currentFrame, new AppRestClient.SnapshotUploadCallback() {
-                    @Override
-                    public void onSuccess(String publicUrl) {
-                        AppMqttClient.getInstance().publishSafetyAlert(
-                                targetVehicle,
-                                targetDriver,
-                                targetShift,
-                                "DROWSINESS", "CRITICAL",
-                                lat, lng, speedKmh,
-                                ear, mar, -5.0f, 0.0f, 0.45f,
-                                publicUrl);
-                    }
+                AppRestClient.getInstance().uploadSnapshotToMinio(currentFrame,
+                        new AppRestClient.SnapshotUploadCallback() {
+                            @Override
+                            public void onSuccess(String publicUrl) {
+                                AppMqttClient.getInstance().publishSafetyAlert(
+                                        targetVehicle,
+                                        targetDriver,
+                                        targetShift,
+                                        "DROWSINESS", "CRITICAL",
+                                        lat, lng, speedKmh,
+                                        ear, mar, -5.0f, 0.0f, 0.45f,
+                                        publicUrl);
+                            }
 
-                    @Override
-                    public void onError(String error) {
-                        // Khi mất mạng/lỗi upload, vẫn đẩy cảnh báo lên MQTT (tự đệm vào SQLite Outbox)
-                        AppMqttClient.getInstance().publishSafetyAlert(
-                                targetVehicle,
-                                targetDriver,
-                                targetShift,
-                                "DROWSINESS", "CRITICAL",
-                                lat, lng, speedKmh,
-                                ear, mar, -5.0f, 0.0f, 0.45f,
-                                null);
-                    }
-                });
+                            @Override
+                            public void onError(String error) {
+                                // Khi mất mạng/lỗi upload, vẫn đẩy cảnh báo lên MQTT (tự đệm vào SQLite Outbox)
+                                AppMqttClient.getInstance().publishSafetyAlert(
+                                        targetVehicle,
+                                        targetDriver,
+                                        targetShift,
+                                        "DROWSINESS", "CRITICAL",
+                                        lat, lng, speedKmh,
+                                        ear, mar, -5.0f, 0.0f, 0.45f,
+                                        null);
+                            }
+                        });
 
                 if (wsClient != null) {
                     wsClient.sendRealtimeAlert(AppConfig.DEFAULT_DRIVER_ID, "DROWSY", "Tài xế có dấu hiệu ngủ gật!");
@@ -278,34 +295,36 @@ public class DriverMonitorActivity extends AppCompatActivity {
                 float ear = dResult.ear;
                 float mar = dResult.mar;
 
-                AppRestClient.getInstance().uploadSnapshotToMinio(currentFrame, new AppRestClient.SnapshotUploadCallback() {
-                    @Override
-                    public void onSuccess(String publicUrl) {
-                        AppMqttClient.getInstance().publishSafetyAlert(
-                                targetVehicle,
-                                targetDriver,
-                                targetShift,
-                                "DISTRACTION", "HIGH",
-                                lat, lng, speedKmh,
-                                ear, mar, 0.0f, 30.0f, 0.0f,
-                                publicUrl);
-                    }
+                AppRestClient.getInstance().uploadSnapshotToMinio(currentFrame,
+                        new AppRestClient.SnapshotUploadCallback() {
+                            @Override
+                            public void onSuccess(String publicUrl) {
+                                AppMqttClient.getInstance().publishSafetyAlert(
+                                        targetVehicle,
+                                        targetDriver,
+                                        targetShift,
+                                        "DISTRACTION", "HIGH",
+                                        lat, lng, speedKmh,
+                                        ear, mar, 0.0f, 30.0f, 0.0f,
+                                        publicUrl);
+                            }
 
-                    @Override
-                    public void onError(String error) {
-                        AppMqttClient.getInstance().publishSafetyAlert(
-                                targetVehicle,
-                                targetDriver,
-                                targetShift,
-                                "DISTRACTION", "HIGH",
-                                lat, lng, speedKmh,
-                                ear, mar, 0.0f, 30.0f, 0.0f,
-                                null);
-                    }
-                });
+                            @Override
+                            public void onError(String error) {
+                                AppMqttClient.getInstance().publishSafetyAlert(
+                                        targetVehicle,
+                                        targetDriver,
+                                        targetShift,
+                                        "DISTRACTION", "HIGH",
+                                        lat, lng, speedKmh,
+                                        ear, mar, 0.0f, 30.0f, 0.0f,
+                                        null);
+                            }
+                        });
 
                 if (wsClient != null) {
-                    wsClient.sendRealtimeAlert(AppConfig.DEFAULT_DRIVER_ID, "DISTRACTED", "Tài xế quay đầu mất tập trung!");
+                    wsClient.sendRealtimeAlert(AppConfig.DEFAULT_DRIVER_ID, "DISTRACTED",
+                            "Tài xế quay đầu mất tập trung!");
                 }
             }
         }
@@ -340,6 +359,73 @@ public class DriverMonitorActivity extends AppCompatActivity {
                 });
         wsClient.connect();
         AppMqttClient.getInstance().connect(this, null, null);
+    }
+
+    private void handleEndTrip() {
+        new AlertDialog.Builder(this)
+                .setTitle("Kết thúc chuyến đi")
+                .setMessage("Bạn có chắc chắn muốn kết thúc chuyến đi này không?")
+                .setPositiveButton("Kết thúc", (dialog, which) -> performEndTrip())
+                .setNegativeButton("Hủy", null)
+                .show();
+    }
+
+    private void performEndTrip() {
+        if (tripId == null || tripId.trim().isEmpty()) {
+            Toast.makeText(this, "Đã kết thúc phiên giám sát", Toast.LENGTH_SHORT).show();
+            finish();
+            return;
+        }
+
+        SecureTokenManager tokenManager = SecureTokenManager.getInstance(getApplicationContext());
+        String token = tokenManager.getToken();
+        if (token == null || token.isEmpty()) {
+            Toast.makeText(this, "Đã kết thúc phiên giám sát", Toast.LENGTH_SHORT).show();
+            finish();
+            return;
+        }
+
+        Toast.makeText(this, "Đang kết thúc chuyến đi...", Toast.LENGTH_SHORT).show();
+        ApiService api = RetrofitClient.getApiService();
+        api.endTrip("Bearer " + token, tripId.trim(), null).enqueue(new Callback<TripActionResponse>() {
+            @Override
+            public void onResponse(Call<TripActionResponse> call, Response<TripActionResponse> response) {
+                if (response.isSuccessful()) {
+                    Toast.makeText(DriverMonitorActivity.this, "Chuyến đi đã hoàn thành!", Toast.LENGTH_SHORT).show();
+                } else {
+                    Log.w(TAG, "Kết thúc chuyến đi HTTP: " + response.code());
+                    Toast.makeText(DriverMonitorActivity.this, "Chuyến đi đã hoàn thành!", Toast.LENGTH_SHORT).show();
+                }
+                finish();
+            }
+
+            @Override
+            public void onFailure(Call<TripActionResponse> call, Throwable t) {
+                Log.e(TAG, "Lỗi kết nối khi gọi endTrip: " + t.getMessage());
+                Toast.makeText(DriverMonitorActivity.this, "Đã kết thúc chuyến đi!", Toast.LENGTH_SHORT).show();
+                finish();
+            }
+        });
+    }
+
+    private void callApiStartTrip(String id) {
+        SecureTokenManager tokenManager = SecureTokenManager.getInstance(getApplicationContext());
+        String token = tokenManager.getToken();
+        if (token == null || token.isEmpty())
+            return;
+
+        ApiService api = RetrofitClient.getApiService();
+        api.startTrip("Bearer " + token, id.trim()).enqueue(new Callback<TripActionResponse>() {
+            @Override
+            public void onResponse(Call<TripActionResponse> call, Response<TripActionResponse> response) {
+                Log.i(TAG, "startTrip HTTP code: " + response.code());
+            }
+
+            @Override
+            public void onFailure(Call<TripActionResponse> call, Throwable t) {
+                Log.e(TAG, "startTrip failure: " + t.getMessage());
+            }
+        });
     }
 
     @Override

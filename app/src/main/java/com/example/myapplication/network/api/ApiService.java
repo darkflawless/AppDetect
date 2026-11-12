@@ -10,6 +10,9 @@ import com.example.myapplication.data.model.LoginRequest;
 import com.example.myapplication.data.model.LoginResponse;
 import com.example.myapplication.data.model.DriverMeResponse;
 import com.example.myapplication.data.model.AssignmentListResponse;
+import com.example.myapplication.data.model.IncidentReportRequest;
+import com.example.myapplication.data.model.IncidentReportResponse;
+import com.example.myapplication.data.model.TripActionResponse;
 import retrofit2.http.Path;
 import retrofit2.http.Query;
 
@@ -38,4 +41,20 @@ public interface ApiService {
             @Header("Authorization") String bearerToken,
             @Path("driverId") String driverId,
             @Query("status") String status);
+
+    @POST("trips/{id}/start")
+    Call<TripActionResponse> startTrip(
+            @Header("Authorization") String bearerToken,
+            @Path("id") String tripId);
+
+    @POST("trips/{id}/end")
+    Call<TripActionResponse> endTrip(
+            @Header("Authorization") String bearerToken,
+            @Path("id") String tripId,
+            @Query("distanceKm") Double distanceKm);
+
+    @POST("incidents")
+    Call<IncidentReportResponse> reportIncident(
+            @Header("Authorization") String bearerToken,
+            @Body IncidentReportRequest request);
 }
