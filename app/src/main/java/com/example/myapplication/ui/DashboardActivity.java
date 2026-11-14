@@ -331,7 +331,8 @@ public class DashboardActivity extends AppCompatActivity {
                 btnStart.setText("Tiếp tục chuyến đi");
                 btnStart.setEnabled(true);
                 btnStart.setBackgroundResource(R.drawable.bg_btn_start_trip);
-                btnStart.setOnClickListener(v -> startTripFlow(item));
+                // Tiếp tục chuyến cũng cần qua xác thực 2 bước
+                btnStart.setOnClickListener(v -> handleStartTrip(item));
                 if (btnReportIncident != null) {
                     btnReportIncident.setVisibility(View.VISIBLE);
                     btnReportIncident.setOnClickListener(v ->
@@ -359,14 +360,14 @@ public class DashboardActivity extends AppCompatActivity {
      */
     private void handleStartTrip(AssignmentListResponse.AssignmentItem item) {
         if (item == null || item.getTripId() == null || item.getTripId().trim().isEmpty()) {
-            startTripFlow(item);
+            startVerificationFlow(item);
             return;
         }
 
         SecureTokenManager tokenManager = SecureTokenManager.getInstance(getApplicationContext());
         String token = tokenManager.getToken();
         if (token == null || token.isEmpty()) {
-            startTripFlow(item);
+            startVerificationFlow(item);
             return;
         }
 
@@ -380,22 +381,36 @@ public class DashboardActivity extends AppCompatActivity {
                 } else {
                     Log.w(TAG, "startTrip response HTTP: " + response.code());
                 }
-                startTripFlow(item);
+                startVerificationFlow(item);
             }
 
             @Override
             public void onFailure(Call<TripActionResponse> call, Throwable t) {
                 Log.e(TAG, "Lỗi kết nối khi gọi startTrip: " + t.getMessage());
-                startTripFlow(item);
+                startVerificationFlow(item);
             }
         });
     }
 
     /**
-     * Chuyển thẳng sang màn hình giám sát buồng lái (DriverMonitorActivity) khi bấm bắt đầu/tiếp tục chuyến
+     * Bắt đầu chuyến đi mới: Chuyển sang màn hình thông báo xác thực 2 bước.
+     * Chỉ chuyến đi bắt đầu lần đầu mới cần xác thực 2 bước.
+     */
+    private void startVerificationFlow(AssignmentListResponse.AssignmentItem item) {
+        Intent intent = new Intent(DashboardActivity.this, PreVerificationActivity.class);
+        if (item != null) {
+            if (item.getTripId() != null) intent.putExtra("TRIP_ID", item.getTripId());
+            if (item.getVehicleId() != null) intent.putExtra("VEHICLE_ID", item.getVehicleId());
+            if (item.getVehiclePlate() != null) intent.putExtra("VEHICLE_PLATE", item.getVehiclePlate());
+        }
+        startActivity(intent);
+    }
+
+    /**
+     * Mọi luồng bắt đầu/tiếp tục chuyến đi đều đi qua màn hình thông báo xác thực 2 bước.
      */
     private void startTripFlow(AssignmentListResponse.AssignmentItem item) {
-        Intent intent = new Intent(DashboardActivity.this, DriverMonitorActivity.class);
+        Intent intent = new Intent(DashboardActivity.this, PreVerificationActivity.class);
         if (item != null) {
             if (item.getTripId() != null) intent.putExtra("TRIP_ID", item.getTripId());
             if (item.getVehicleId() != null) intent.putExtra("VEHICLE_ID", item.getVehicleId());

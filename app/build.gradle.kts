@@ -23,6 +23,7 @@ val serverRestPort: Int = getProp("server.rest_port", "8080").toIntOrNull() ?: 8
 val serverWsPort: Int = getProp("server.ws_port", "8080").toIntOrNull() ?: 8080
 val serverMqttPort: Int = getProp("server.mqtt_port", "1883").toIntOrNull() ?: 1883
 val serverUdpPort: Int = getProp("server.udp_port", "9090").toIntOrNull() ?: 9090
+val serverAiPort: Int = getProp("server.ai_port", "8000").toIntOrNull() ?: 8000
 val serverMediaPort: Int = getProp("server.media_port", "9000").toIntOrNull() ?: 9000
 
 android {
@@ -47,6 +48,7 @@ android {
         buildConfigField("int", "WS_PORT", "$serverWsPort")
         buildConfigField("int", "MQTT_PORT", "$serverMqttPort")
         buildConfigField("int", "UDP_PORT", "$serverUdpPort")
+        buildConfigField("int", "AI_PORT", "$serverAiPort")
         buildConfigField("int", "MEDIA_PORT", "$serverMediaPort")
     }
 
