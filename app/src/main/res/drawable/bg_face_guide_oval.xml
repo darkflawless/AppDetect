@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Khung hướng dẫn hình oval để định vị khuôn mặt vào camera -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <stroke
+        android:width="3dp"
+        android:color="#66FFFFFF" />
+    <solid android:color="#00000000" />
+</shape>
+

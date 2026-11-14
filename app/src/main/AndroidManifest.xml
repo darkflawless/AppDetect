@@ -59,6 +59,12 @@
             android:screenOrientation="portrait" />
 
 
+        <!-- Màn hình thông báo quy trình xác thực 2 bước (trước mọi chuyến đi) -->
+        <activity
+            android:name=".ui.PreVerificationActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
         <!-- Màn hình xác thực tài xế -->
         <activity
             android:name=".ui.DriverVerifyActivity"
