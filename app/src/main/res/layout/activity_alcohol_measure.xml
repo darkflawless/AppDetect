@@ -1,0 +1,252 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#121212">
+
+    <!-- Header xanh tối -->
+    <View
+        android:id="@+id/viewHeader"
+        android:layout_width="0dp"
+        android:layout_height="130dp"
+        android:background="#1B5E20"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- Bước 2 / 2 -->
+    <TextView
+        android:id="@+id/tvAlcoholStep"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="BƯỚC 2 / 2"
+        android:textColor="#80FFFFFF"
+        android:textSize="11sp"
+        android:letterSpacing="0.15"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:layout_marginTop="22dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- Tiêu đề -->
+    <TextView
+        android:id="@+id/tvAlcoholTitle"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="Kiểm tra nồng độ cồn"
+        android:textColor="#FFFFFF"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:layout_marginTop="4dp"
+        app:layout_constraintTop_toBottomOf="@id/tvAlcoholStep"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- Thông tin tài xế / xe -->
+    <TextView
+        android:id="@+id/tvAlcoholDriverInfo"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="Thông tin tài xế"
+        android:textColor="#CCFFFFFF"
+        android:textSize="12sp"
+        android:gravity="center"
+        android:layout_marginTop="6dp"
+        android:layout_marginStart="24dp"
+        android:layout_marginEnd="24dp"
+        app:layout_constraintTop_toBottomOf="@id/viewHeader"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- Card kết quả đo -->
+    <androidx.cardview.widget.CardView
+        android:id="@+id/cardResult"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="24dp"
+        android:layout_marginEnd="24dp"
+        android:layout_marginTop="20dp"
+        app:cardCornerRadius="20dp"
+        app:cardElevation="8dp"
+        app:cardBackgroundColor="#1E1E1E"
+        app:layout_constraintTop_toBottomOf="@id/tvAlcoholDriverInfo"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:padding="28dp">
+
+            <!-- Trạng thái đếm ngược hoặc icon -->
+            <TextView
+                android:id="@+id/tvCountdown"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Thổi vào cảm biến"
+                android:textColor="#43A047"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:layout_marginBottom="12dp" />
+
+            <!-- Giá trị đo nồng độ cồn hoặc số đếm ngược -->
+            <TextView
+                android:id="@+id/tvAlcoholLevel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="--"
+                android:textColor="#FFFFFF"
+                android:textSize="64sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:fontFamily="sans-serif-light" />
+
+            <!-- Đơn vị -->
+            <TextView
+                android:id="@+id/tvAlcoholUnit"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="mg/L"
+                android:textColor="#80FFFFFF"
+                android:textSize="18sp"
+                android:visibility="gone"
+                android:layout_marginTop="4dp" />
+
+            <!-- Thông báo thành công tạm thời (Popup pill) -->
+            <TextView
+                android:id="@+id/tvSuccessPill"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="✓ Kết nối thiết bị thành công"
+                android:textColor="#FFFFFF"
+                android:background="#2E7D32"
+                android:paddingStart="14dp"
+                android:paddingEnd="14dp"
+                android:paddingTop="6dp"
+                android:paddingBottom="6dp"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:visibility="gone"
+                android:layout_marginTop="10dp" />
+
+            <!-- Trạng thái BLE -->
+            <TextView
+                android:id="@+id/tvBleStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Vui lòng nhấn &quot;Kết nối thiết bị&quot; để tìm cảm biến"
+                android:textColor="#B0BEC5"
+                android:textSize="13sp"
+                android:gravity="center"
+                android:lineSpacingMultiplier="1.4"
+                android:layout_marginTop="14dp" />
+
+            <!-- ProgressBar -->
+            <ProgressBar
+                android:id="@+id/progressBar"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:visibility="gone"
+                android:indeterminateTint="#43A047"
+                android:layout_marginTop="12dp" />
+
+        </LinearLayout>
+    </androidx.cardview.widget.CardView>
+
+    <!-- Hướng dẫn -->
+    <LinearLayout
+        android:id="@+id/layoutGuide"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="#1A43A047"
+        android:padding="14dp"
+        android:layout_marginStart="24dp"
+        android:layout_marginEnd="24dp"
+        android:layout_marginTop="14dp"
+        app:layout_constraintTop_toBottomOf="@id/cardResult"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="ℹ️"
+            android:textSize="16sp"
+            android:layout_marginEnd="10dp" />
+
+        <TextView
+            android:id="@+id/tvGuideMsg"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Đảm bảo thiết bị cảm biến cồn ESP32 đã bật nguồn và sẵn sàng kết nối."
+            android:textColor="#A5D6A7"
+            android:textSize="12sp"
+            android:lineSpacingMultiplier="1.4" />
+    </LinearLayout>
+
+    <!-- Nút 1: Kết nối thiết bị -->
+    <Button
+        android:id="@+id/btnConnect"
+        android:layout_width="0dp"
+        android:layout_height="54dp"
+        android:text="Kết nối thiết bị"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        android:textAllCaps="false"
+        android:backgroundTint="#1565C0"
+        android:layout_marginStart="24dp"
+        android:layout_marginEnd="24dp"
+        android:layout_marginBottom="8dp"
+        app:layout_constraintBottom_toTopOf="@id/btnMeasure"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- Nút 2: Bắt đầu đo (Ẩn hoặc disable ban đầu, bật sau khi kết nối thành công) -->
+    <Button
+        android:id="@+id/btnMeasure"
+        android:layout_width="0dp"
+        android:layout_height="54dp"
+        android:text="Bắt đầu đo"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        android:textAllCaps="false"
+        android:backgroundTint="#43A047"
+        android:enabled="false"
+        android:visibility="gone"
+        android:layout_marginStart="24dp"
+        android:layout_marginEnd="24dp"
+        android:layout_marginBottom="8dp"
+        app:layout_constraintBottom_toTopOf="@id/btnSubmit"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- Nút 3: Gửi kết quả (Chỉ hiện khi đã đo xong) -->
+    <Button
+        android:id="@+id/btnSubmit"
+        android:layout_width="0dp"
+        android:layout_height="54dp"
+        android:text="Gửi kết quả"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        android:textAllCaps="false"
+        android:backgroundTint="#2E7D32"
+        android:visibility="gone"
+        android:layout_marginStart="24dp"
+        android:layout_marginEnd="24dp"
+        android:layout_marginBottom="24dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>

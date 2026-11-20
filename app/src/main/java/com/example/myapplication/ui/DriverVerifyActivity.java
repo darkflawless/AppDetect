@@ -358,13 +358,19 @@ public class DriverVerifyActivity extends AppCompatActivity {
     // ═══════════════════════════════════════════════════════════════════════
 
     /**
-     * Chuyển sang DriverMonitorActivity mang theo toàn bộ thông tin chuyến đi.
+     * Xác thực khuôn mặt thành công → chuyển sang Bước 2: Đo nồng độ cồn.
      */
     private void proceedToMonitor() {
         hasNavigated = true;
         cancelCountdown();
 
-        Intent intent = new Intent(DriverVerifyActivity.this, DriverMonitorActivity.class);
+        // Bước 2: Đo nồng độ cồn qua BLE (AlcoholMeasureActivity)
+        // AlcoholMeasureActivity sẽ tự điều hướng vào DriverMonitorActivity nếu pass
+        Intent intent = new Intent(DriverVerifyActivity.this, AlcoholMeasureActivity.class);
+        // Truyền thêm DRIVER_ID để AlcoholMeasureActivity biết driverId
+        String driverId = com.example.myapplication.utils.SecureTokenManager
+                .getInstance(getApplicationContext()).getDriverId();
+        if (driverId != null)     intent.putExtra("DRIVER_ID", driverId);
         if (tripId != null)       intent.putExtra("TRIP_ID", tripId);
         if (vehicleId != null)    intent.putExtra("VEHICLE_ID", vehicleId);
         if (vehiclePlate != null) intent.putExtra("VEHICLE_PLATE", vehiclePlate);
