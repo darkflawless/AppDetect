@@ -9,6 +9,7 @@ public class SecureTokenManager {
     private static final String PREF_FILE_NAME = "token_prefs";
     private static final String KEY_ACCESS_TOKEN = "access_token";
     private static final String KEY_DRIVER_ID = "driver_id";
+    private static final String KEY_USERNAME = "username";
     private static final String KEY_FULL_NAME = "full_name";
     private static final String KEY_AVATAR_URL = "avatar_url";
     private static SecureTokenManager instance;
@@ -32,6 +33,14 @@ public class SecureTokenManager {
                 .putString(KEY_DRIVER_ID, driverId)
                 .apply();
         Log.i(TAG, "Đã lưu token (độ dài: " + (token != null ? token.length() : 0) + ")");
+    }
+
+    public void saveUsername(String username) {
+        prefs.edit().putString(KEY_USERNAME, username).apply();
+    }
+
+    public String getUsername() {
+        return prefs.getString(KEY_USERNAME, null);
     }
 
     public void saveFullName(String fullName) {

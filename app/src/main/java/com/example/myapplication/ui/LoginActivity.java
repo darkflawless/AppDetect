@@ -62,6 +62,12 @@ public class LoginActivity extends AppCompatActivity {
                     SecureTokenManager tokenManager = SecureTokenManager.getInstance(getApplicationContext());
                     tokenManager.saveToken(token, driverId);
 
+                    if (loginResponse.getData() != null && loginResponse.getData().getUsername() != null) {
+                        tokenManager.saveUsername(loginResponse.getData().getUsername());
+                    } else {
+                        tokenManager.saveUsername(username);
+                    }
+
                     if (loginResponse.getData() != null && loginResponse.getData().getStaff() != null) {
                         String fullName = loginResponse.getData().getStaff().getFullName();
                         if (fullName != null) {

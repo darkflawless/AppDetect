@@ -13,6 +13,8 @@ import com.example.myapplication.data.model.AssignmentListResponse;
 import com.example.myapplication.data.model.IncidentReportRequest;
 import com.example.myapplication.data.model.IncidentReportResponse;
 import com.example.myapplication.data.model.TripActionResponse;
+import com.example.myapplication.data.model.AlcoholRecordRequest;
+import com.example.myapplication.data.model.AlcoholRecordResponse;
 import retrofit2.http.Path;
 import retrofit2.http.Query;
 
@@ -57,4 +59,10 @@ public interface ApiService {
     Call<IncidentReportResponse> reportIncident(
             @Header("Authorization") String bearerToken,
             @Body IncidentReportRequest request);
+
+    // ── Nồng Độ Cồn ────────────────────────────────────────────────────────
+    @POST("alcohol-records")
+    Call<AlcoholRecordResponse> submitAlcoholRecord(
+            @Header("Authorization") String bearerToken,
+            @Body AlcoholRecordRequest request);
 }
