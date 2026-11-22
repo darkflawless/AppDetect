@@ -11,18 +11,32 @@ val localProperties = Properties().apply {
     }
 }
 
+// Thu tu uu tien: bien moi truong > local.properties (rieng tung may) > gradle.properties (chung) > mac dinh.
 fun getProp(key: String, defaultVal: String): String {
     return System.getenv(key.replace('.', '_').uppercase())
-        ?: (project.findProperty(key) as? String)
         ?: localProperties.getProperty(key)
+        ?: (project.findProperty(key) as? String)
         ?: defaultVal
 }
 
-val serverIp: String = getProp("server.ip", "192.168.1.11")
+// server.dev=false (mac dinh): goi server that tren EC2 (server.prod_ip).
+// server.dev=true: goi backend chay tren may trong mang LAN, dat server.dev_ip trong local.properties.
+val serverDev: Boolean = getProp("server.dev", "false").trim().equals("true", ignoreCase = true)
+val serverIp: String = if (serverDev) {
+    getProp("server.dev_ip", "").trim().ifEmpty {
+        throw GradleException(
+            "server.dev=true nhung chua co server.dev_ip. Them vao local.properties, vi du: server.dev_ip=192.168.1.11"
+        )
+    }
+} else {
+    getProp("server.prod_ip", "56.10.109.51").trim()
+}
+println("[AppDetect] Server: $serverIp (${if (serverDev) "DEV - may LAN" else "PROD - EC2"})")
 val serverRestPort: Int = getProp("server.rest_port", "8080").toIntOrNull() ?: 8080
 val serverWsPort: Int = getProp("server.ws_port", "8080").toIntOrNull() ?: 8080
 val serverMqttPort: Int = getProp("server.mqtt_port", "1883").toIntOrNull() ?: 1883
 val serverUdpPort: Int = getProp("server.udp_port", "9090").toIntOrNull() ?: 9090
+val serverAiPort: Int = getProp("server.ai_port", "8000").toIntOrNull() ?: 8000
 val serverMediaPort: Int = getProp("server.media_port", "9000").toIntOrNull() ?: 9000
 
 android {
@@ -47,6 +61,7 @@ android {
         buildConfigField("int", "WS_PORT", "$serverWsPort")
         buildConfigField("int", "MQTT_PORT", "$serverMqttPort")
         buildConfigField("int", "UDP_PORT", "$serverUdpPort")
+        buildConfigField("int", "AI_PORT", "$serverAiPort")
         buildConfigField("int", "MEDIA_PORT", "$serverMediaPort")
     }
 

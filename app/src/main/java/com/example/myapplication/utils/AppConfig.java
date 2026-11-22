@@ -16,6 +16,7 @@ public final class AppConfig {
     public static final int REST_PORT = BuildConfig.REST_PORT;
     public static final int WS_PORT = BuildConfig.WS_PORT;
     public static final int UDP_PORT = BuildConfig.UDP_PORT;
+    public static final int AI_PORT = BuildConfig.AI_PORT;
     public static final int MQTT_PORT = BuildConfig.MQTT_PORT;
     public static final int MEDIA_PORT = BuildConfig.MEDIA_PORT;
 
@@ -52,7 +53,7 @@ public final class AppConfig {
     }
 
     public static String getFastApiVerifyUrl() {
-        return "http://" + SERVER_IP + ":" + REST_PORT + "/api/verify";
+        return "http://" + SERVER_IP + ":" + AI_PORT + "/api/verify";
     }
 
     /**

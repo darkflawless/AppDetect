@@ -14,7 +14,14 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
+    <!-- Quyền Bluetooth BLE -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
     <uses-feature android:name="android.hardware.camera" android:required="true" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
     <application
         android:allowBackup="true"
@@ -59,12 +66,24 @@
             android:screenOrientation="portrait" />
 
 
+        <!-- Màn hình thông báo quy trình xác thực 2 bước (trước mọi chuyến đi) -->
+        <activity
+            android:name=".ui.PreVerificationActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
         <!-- Màn hình xác thực tài xế -->
         <activity
             android:name=".ui.DriverVerifyActivity"
             android:exported="false"
             android:screenOrientation="portrait">
         </activity>
+
+        <!-- Màn hình đo nồng độ cồn qua BLE (Bước 2) -->
+        <activity
+            android:name=".ui.AlcoholMeasureActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
 
         <!-- Màn hình giám sát cabin -->
         <activity

@@ -62,6 +62,12 @@ public class LoginActivity extends AppCompatActivity {
                     SecureTokenManager tokenManager = SecureTokenManager.getInstance(getApplicationContext());
                     tokenManager.saveToken(token, driverId);
 
+                    if (loginResponse.getData() != null && loginResponse.getData().getUsername() != null) {
+                        tokenManager.saveUsername(loginResponse.getData().getUsername());
+                    } else {
+                        tokenManager.saveUsername(username);
+                    }
+
                     if (loginResponse.getData() != null && loginResponse.getData().getStaff() != null) {
                         String fullName = loginResponse.getData().getStaff().getFullName();
                         if (fullName != null) {
@@ -75,7 +81,7 @@ public class LoginActivity extends AppCompatActivity {
                     finish();
                 } else {
                     String msg = (response.body() != null && response.body().getMessage() != null)
-                            ? response.body().getMessage() : "Dang nhap that bai (HTTP " + response.code() + ")";
+                            ? response.body().getMessage() : "Đăng nhập thất bại (HTTP " + response.code() + ")";
                     Toast.makeText(LoginActivity.this, msg, Toast.LENGTH_SHORT).show();
                 }
             }

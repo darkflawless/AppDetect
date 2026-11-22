@@ -15,16 +15,6 @@
         android:gravity="center_vertical"
         android:paddingHorizontal="14dp">
 
-        <!-- Hamburger Icon -->
-        <TextView
-            android:id="@+id/btn_menu"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
-            android:text="&#9776;"
-            android:textColor="@color/white"
-            android:textSize="20sp"
-            android:gravity="center" />
-
         <!-- Title -->
         <TextView
             android:layout_width="0dp"
@@ -34,17 +24,7 @@
             android:textColor="@color/white"
             android:textSize="14sp"
             android:textStyle="bold"
-            android:layout_marginStart="8dp" />
-
-        <!-- Notification Bell -->
-        <TextView
-            android:id="@+id/btn_notification"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
-            android:text="&#128276;"
-            android:textSize="18sp"
-            android:gravity="center"
-            android:layout_marginEnd="6dp" />
+            android:layout_marginStart="4dp" />
 
         <!-- Logout button (đỏ) -->
         <LinearLayout
@@ -160,84 +140,6 @@
                     </LinearLayout>
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
-
-            <!-- TIÊU ĐỀ: THỐNG KÊ NHANH -->
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="THỐNG KÊ NHANH"
-                android:textSize="13sp"
-                android:textStyle="bold"
-                android:textColor="@color/text_title"
-                android:layout_marginBottom="8dp" />
-
-            <!-- Row 2 card thống kê -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginBottom="16dp">
-
-                <!-- Thống kê Chuyến hôm nay -->
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:background="@drawable/bg_card_bordered"
-                    android:orientation="vertical"
-                    android:gravity="center"
-                    android:paddingVertical="14dp"
-                    android:paddingHorizontal="8dp"
-                    android:layout_marginEnd="6dp">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Chuyến hôm nay:"
-                        android:textSize="12sp"
-                        android:textColor="@color/text_secondary" />
-
-                    <TextView
-                        android:id="@+id/tv_stat_trips"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="5"
-                        android:textSize="22sp"
-                        android:textStyle="bold"
-                        android:textColor="@color/text_main"
-                        android:layout_marginTop="4dp" />
-                </LinearLayout>
-
-                <!-- Thống kê Thu nhập tạm tính -->
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:background="@drawable/bg_card_bordered"
-                    android:orientation="vertical"
-                    android:gravity="center"
-                    android:paddingVertical="14dp"
-                    android:paddingHorizontal="8dp"
-                    android:layout_marginStart="6dp">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Thu nhập tạm tính:"
-                        android:textSize="12sp"
-                        android:textColor="@color/text_secondary" />
-
-                    <TextView
-                        android:id="@+id/tv_stat_income"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="450.000đ"
-                        android:textSize="20sp"
-                        android:textStyle="bold"
-                        android:textColor="@color/text_main"
-                        android:layout_marginTop="4dp" />
-                </LinearLayout>
-            </LinearLayout>
 
             <!-- TIÊU ĐỀ: LỊCH PHÂN CÔNG HÔM NAY -->
             <LinearLayout
@@ -385,48 +287,7 @@
                         android:background="@color/divider"
                         android:layout_marginHorizontal="14dp" />
 
-                    <!-- Mục 2: Chỉnh sửa thông tin cá nhân -->
-                    <LinearLayout
-                        android:id="@+id/btn_menu_edit_profile"
-                        android:layout_width="match_parent"
-                        android:layout_height="52dp"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:paddingHorizontal="14dp"
-                        android:background="?android:attr/selectableItemBackground"
-                        android:clickable="true"
-                        android:focusable="true">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="&#9998;"
-                            android:textSize="18sp"
-                            android:layout_marginEnd="12dp" />
-
-                        <TextView
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="Chỉnh sửa thông tin cá nhân"
-                            android:textSize="14sp"
-                            android:textColor="@color/text_main" />
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="&#8250;"
-                            android:textSize="22sp"
-                            android:textColor="@color/text_secondary" />
-                    </LinearLayout>
-
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="1dp"
-                        android:background="@color/divider"
-                        android:layout_marginHorizontal="14dp" />
-
-                    <!-- Mục 3: Lịch sử chuyến đi -->
+                    <!-- Mục 2: Lịch sử chuyến đi -->
                     <LinearLayout
                         android:id="@+id/btn_menu_history"
                         android:layout_width="match_parent"

@@ -7,7 +7,30 @@ Tài liệu này hướng dẫn cách cấu hình địa chỉ IP máy tính và
 ## 📌 Nguyên tắc hoạt động
 * Điện thoại và máy tính chạy server **bắt buộc phải kết nối chung một mạng Wi-Fi** (hoặc chung mạng LAN/Hotspot).
 * Điện thoại **không bật 4G/5G** khi đang kết nối server nội bộ qua Wi-Fi.
-* Toàn bộ cấu hình IP và Port đã được **quản lý tập trung 100% tại file `gradle.properties`**, không cần sửa tay bất kỳ dòng code Java/XML nào.
+* Toàn bộ cấu hình IP và Port được **quản lý tập trung tại `gradle.properties` (dùng chung) và `local.properties` (riêng từng máy)**, không cần sửa tay bất kỳ dòng code Java/XML nào.
+
+---
+
+## Chọn server: EC2 (mặc định) hay máy trong mạng LAN
+
+App có cờ `server.dev`:
+
+| `server.dev` | App gọi tới | Cần làm gì |
+|---|---|---|
+| `false` (mặc định trong `gradle.properties`) | Server thật trên AWS EC2: `server.prod_ip=56.10.109.51` | Không cần làm gì, build là chạy |
+| `true` | Backend chạy trên máy trong cùng Wi-Fi | Đặt `server.dev=true` và `server.dev_ip=<IPv4 máy chạy backend>` trong **`local.properties`** |
+
+* `local.properties` là file **riêng từng máy, không lên git**, và được **ưu tiên hơn** `gradle.properties`.
+* **Không ghi IP Wi-Fi/LAN của máy mình vào `gradle.properties`** (file dùng chung), để pull code không làm đổi IP của người khác.
+* Khi Sync Gradle, dòng `[AppDetect] Server: ...` cho biết app đang trỏ tới đâu.
+
+Ví dụ `local.properties` khi chạy backend trên máy mình:
+```properties
+server.dev=true
+server.dev_ip=192.168.1.11
+```
+
+Các bước dưới đây chỉ cần khi dùng chế độ **dev** (`server.dev=true`).
 
 ---
 
@@ -21,19 +44,17 @@ Tài liệu này hướng dẫn cách cấu hình địa chỉ IP máy tính và
 
 ---
 
-## Bước 2: Cập nhật cấu hình tập trung trong `gradle.properties`
-Mở file **`gradle.properties`** ở thư mục gốc của project Android, tìm đến phần:
+## Bước 2: Khai báo IP trong `local.properties`
+Mở file **`local.properties`** ở thư mục gốc của project Android (file riêng, không lên git), thêm:
 
 ```properties
-# ==============================================================================
-# CẤU HÌNH KẾT NỐI SERVER TẬP TRUNG (SERVER IP & PORTS CONFIGURATION)
-# Khi thay đổi địa chỉ IP máy tính (mạng Wi-Fi mới) hoặc Port, chỉ cần sửa tại đây!
-# Sau khi sửa, chạy lại app hoặc Sync Gradle để cập nhật vào BuildConfig.
-# ==============================================================================
+server.dev=true
+server.dev_ip=192.168.1.11
+```
 
-# Địa chỉ IPv4 của máy tính chạy Server trong mạng LAN (xem bằng lệnh 'ipconfig' trên Windows)
-server.ip=192.168.1.11
+Các cổng dịch vụ dùng chung nằm trong `gradle.properties`:
 
+```properties
 # Cổng REST API của Backend Spring Boot (phục vụ đăng nhập, lấy hồ sơ /drivers/me, lịch trình, ca chạy, vi phạm)
 server.rest_port=8080
 
@@ -50,12 +71,12 @@ server.udp_port=9090
 server.media_port=9000
 ```
 
-👉 **Bạn chỉ cần thay giá trị `server.ip`** thành địa chỉ IPv4 vừa tìm được ở Bước 1. Các cổng dịch vụ (`rest_port`, `ws_port`, `media_port`...) có thể điều chỉnh tùy theo môi trường triển khai thực tế.
+👉 **Bạn chỉ cần thay giá trị `server.dev_ip`** trong `local.properties` thành địa chỉ IPv4 vừa tìm được ở Bước 1. Các cổng dịch vụ (`rest_port`, `ws_port`, `media_port`...) có thể ghi đè trong `local.properties` nếu máy bạn dùng cổng khác.
 
 ---
 
 ## Bước 3: Build và cài đặt ứng dụng
-Sau khi sửa `gradle.properties`, bạn có thể chạy:
+Sau khi sửa `local.properties`, bạn có thể chạy:
 
 * **Qua Android Studio**: Nhấn nút **Sync Project with Gradle Files** 🐘 -> Nhấn nút **Run 'app'** ▶️.
 * **Hoặc qua dòng lệnh (Terminal)**:
