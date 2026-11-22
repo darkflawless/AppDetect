@@ -409,9 +409,7 @@ public class DashboardActivity extends AppCompatActivity {
      * Chỉ chuyến đi bắt đầu lần đầu mới cần xác thực 2 bước.
      */
     private void startVerificationFlow(AssignmentListResponse.AssignmentItem item) {
-        // Intent intent = new Intent(DashboardActivity.this,
-        // PreVerificationActivity.class);
-        Intent intent = new Intent(DashboardActivity.this, DriverMonitorActivity.class);
+        Intent intent = new Intent(DashboardActivity.this, PreVerificationActivity.class);
         if (item != null) {
             if (item.getTripId() != null)
                 intent.putExtra("TRIP_ID", item.getTripId());
@@ -428,9 +426,7 @@ public class DashboardActivity extends AppCompatActivity {
      * bước.
      */
     private void startTripFlow(AssignmentListResponse.AssignmentItem item) {
-        // Intent intent = new Intent(DashboardActivity.this,
-        // PreVerificationActivity.class);
-        Intent intent = new Intent(DashboardActivity.this, DriverMonitorActivity.class);
+        Intent intent = new Intent(DashboardActivity.this, PreVerificationActivity.class);
         if (item != null) {
             if (item.getTripId() != null)
                 intent.putExtra("TRIP_ID", item.getTripId());
