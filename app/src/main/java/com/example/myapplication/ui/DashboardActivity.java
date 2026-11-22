@@ -59,22 +59,22 @@ public class DashboardActivity extends AppCompatActivity {
         setContentView(R.layout.activity_dashboard);
 
         // Bind views header & navigation
-        tvDashGreeting     = findViewById(R.id.tv_dash_greeting);
-        tvDashDriverCode   = findViewById(R.id.tv_dash_driver_code);
-        ivDashAvatar       = findViewById(R.id.iv_dash_avatar);
-        btnMenuProfile     = findViewById(R.id.btn_menu_profile);
-        tabProfile         = findViewById(R.id.tab_profile);
-        btnLogout          = findViewById(R.id.btn_logout);
-        btnMenuHistory     = findViewById(R.id.btn_menu_history);
-        tabHome            = findViewById(R.id.tab_home);
-        tabSchedule        = findViewById(R.id.tab_schedule);
-        tabHistory         = findViewById(R.id.tab_history);
+        tvDashGreeting = findViewById(R.id.tv_dash_greeting);
+        tvDashDriverCode = findViewById(R.id.tv_dash_driver_code);
+        ivDashAvatar = findViewById(R.id.iv_dash_avatar);
+        btnMenuProfile = findViewById(R.id.btn_menu_profile);
+        tabProfile = findViewById(R.id.tab_profile);
+        btnLogout = findViewById(R.id.btn_logout);
+        btnMenuHistory = findViewById(R.id.btn_menu_history);
+        tabHome = findViewById(R.id.tab_home);
+        tabSchedule = findViewById(R.id.tab_schedule);
+        tabHistory = findViewById(R.id.tab_history);
 
         // Bind views lịch phân công hôm nay
         llScheduleContainer = findViewById(R.id.ll_schedule_container);
-        cvEmptySchedule     = findViewById(R.id.cv_empty_schedule);
-        pbScheduleLoading   = findViewById(R.id.pb_schedule_loading);
-        btnRefreshSchedule  = findViewById(R.id.btn_refresh_schedule);
+        cvEmptySchedule = findViewById(R.id.cv_empty_schedule);
+        pbScheduleLoading = findViewById(R.id.pb_schedule_loading);
+        btnRefreshSchedule = findViewById(R.id.btn_refresh_schedule);
 
         // Hiển thị thông tin tài xế từ TokenManager
         SecureTokenManager tokenManager = SecureTokenManager.getInstance(getApplicationContext());
@@ -132,14 +132,17 @@ public class DashboardActivity extends AppCompatActivity {
             Intent intent = new Intent(DashboardActivity.this, TripHistoryActivity.class);
             startActivity(intent);
         };
-        if (btnMenuHistory != null) btnMenuHistory.setOnClickListener(openHistoryListener);
-        if (tabHistory != null) tabHistory.setOnClickListener(openHistoryListener);
+        if (btnMenuHistory != null)
+            btnMenuHistory.setOnClickListener(openHistoryListener);
+        if (tabHistory != null)
+            tabHistory.setOnClickListener(openHistoryListener);
 
         // Placeholder cho các chức năng đang hoàn thiện
-        View.OnClickListener placeholder = v ->
-                Toast.makeText(DashboardActivity.this, "Chức năng đang phát triển", Toast.LENGTH_SHORT).show();
+        View.OnClickListener placeholder = v -> Toast
+                .makeText(DashboardActivity.this, "Chức năng đang phát triển", Toast.LENGTH_SHORT).show();
 
-        if (tabSchedule != null) tabSchedule.setOnClickListener(v -> loadTodaySchedule(tokenManager));
+        if (tabSchedule != null)
+            tabSchedule.setOnClickListener(v -> loadTodaySchedule(tokenManager));
     }
 
     @Override
@@ -172,15 +175,18 @@ public class DashboardActivity extends AppCompatActivity {
 
         AppRestClient.getInstance().setAuthToken(token);
 
-        if (pbScheduleLoading != null) pbScheduleLoading.setVisibility(View.VISIBLE);
-        if (cvEmptySchedule != null) cvEmptySchedule.setVisibility(View.GONE);
+        if (pbScheduleLoading != null)
+            pbScheduleLoading.setVisibility(View.VISIBLE);
+        if (cvEmptySchedule != null)
+            cvEmptySchedule.setVisibility(View.GONE);
 
         Log.i(TAG, "Đang gọi API lấy lịch hôm nay: GET /assignments/me/today");
         ApiService api = RetrofitClient.getApiService();
         api.getTodayAssignments("Bearer " + token).enqueue(new Callback<AssignmentListResponse>() {
             @Override
             public void onResponse(Call<AssignmentListResponse> call, Response<AssignmentListResponse> response) {
-                if (pbScheduleLoading != null) pbScheduleLoading.setVisibility(View.GONE);
+                if (pbScheduleLoading != null)
+                    pbScheduleLoading.setVisibility(View.GONE);
 
                 Log.i(TAG, "Kết quả /assignments/me/today: HTTP " + response.code());
                 if (response.isSuccessful() && response.body() != null && response.body().isSuccess()) {
@@ -188,7 +194,8 @@ public class DashboardActivity extends AppCompatActivity {
                     Log.i(TAG, "Số lượng chuyến hôm nay nhận được: " + (items != null ? items.size() : 0));
                     renderScheduleList(items);
                 } else {
-                    String errorMsg = (response.body() != null) ? response.body().getMessage() : "HTTP " + response.code();
+                    String errorMsg = (response.body() != null) ? response.body().getMessage()
+                            : "HTTP " + response.code();
                     Log.w(TAG, "API /assignments/me/today thất bại (" + errorMsg + "). Thử gọi qua driverId...");
                     // Fallback thử gọi qua driverId nếu /assignments/me/today chưa khả dụng
                     String driverId = tokenManager.getDriverId();
@@ -202,7 +209,8 @@ public class DashboardActivity extends AppCompatActivity {
 
             @Override
             public void onFailure(Call<AssignmentListResponse> call, Throwable t) {
-                if (pbScheduleLoading != null) pbScheduleLoading.setVisibility(View.GONE);
+                if (pbScheduleLoading != null)
+                    pbScheduleLoading.setVisibility(View.GONE);
                 Log.e(TAG, "Lỗi mạng hoặc parse JSON khi gọi /assignments/me/today: " + t.getMessage(), t);
                 // Fallback thử gọi qua driverId
                 String driverId = tokenManager.getDriverId();
@@ -244,7 +252,8 @@ public class DashboardActivity extends AppCompatActivity {
      * Hiển thị danh sách các thẻ chuyến đi được phân công trong ngày
      */
     private void renderScheduleList(List<AssignmentListResponse.AssignmentItem> items) {
-        if (llScheduleContainer == null) return;
+        if (llScheduleContainer == null)
+            return;
         llScheduleContainer.removeAllViews();
 
         if (items == null || items.isEmpty()) {
@@ -252,19 +261,20 @@ public class DashboardActivity extends AppCompatActivity {
             return;
         }
 
-        if (cvEmptySchedule != null) cvEmptySchedule.setVisibility(View.GONE);
+        if (cvEmptySchedule != null)
+            cvEmptySchedule.setVisibility(View.GONE);
 
         LayoutInflater inflater = LayoutInflater.from(this);
         for (AssignmentListResponse.AssignmentItem item : items) {
             View card = inflater.inflate(R.layout.item_assignment_schedule, llScheduleContainer, false);
 
-            TextView tvTime         = card.findViewById(R.id.tv_item_trip_time);
-            TextView tvStatus       = card.findViewById(R.id.tv_item_trip_status);
+            TextView tvTime = card.findViewById(R.id.tv_item_trip_time);
+            TextView tvStatus = card.findViewById(R.id.tv_item_trip_status);
             TextView tvRouteVehicle = card.findViewById(R.id.tv_item_route_vehicle);
-            TextView tvStart        = card.findViewById(R.id.tv_item_start_location);
-            TextView tvEnd          = card.findViewById(R.id.tv_item_end_location);
-            TextView tvDistance     = card.findViewById(R.id.tv_item_distance);
-            Button btnStart         = card.findViewById(R.id.btn_item_start_trip);
+            TextView tvStart = card.findViewById(R.id.tv_item_start_location);
+            TextView tvEnd = card.findViewById(R.id.tv_item_end_location);
+            TextView tvDistance = card.findViewById(R.id.tv_item_distance);
+            Button btnStart = card.findViewById(R.id.btn_item_start_trip);
             Button btnReportIncident = card.findViewById(R.id.btn_item_report_incident);
 
             // 1. Giờ chạy
@@ -282,7 +292,8 @@ public class DashboardActivity extends AppCompatActivity {
                 routeVehicleText.append("Mã tuyến: ").append(item.getRouteCode());
             }
             if (item.getVehiclePlate() != null && !item.getVehiclePlate().isEmpty()) {
-                if (routeVehicleText.length() > 0) routeVehicleText.append("  |  ");
+                if (routeVehicleText.length() > 0)
+                    routeVehicleText.append("  |  ");
                 routeVehicleText.append("Xe: ").append(item.getVehiclePlate());
             }
             if (routeVehicleText.length() > 0) {
@@ -294,9 +305,11 @@ public class DashboardActivity extends AppCompatActivity {
 
             // 4. Điểm đi & Điểm đến
             String startLoc = (item.getStartLocation() != null && !item.getStartLocation().isEmpty())
-                    ? item.getStartLocation() : "Chưa cập nhật";
+                    ? item.getStartLocation()
+                    : "Chưa cập nhật";
             String endLoc = (item.getEndLocation() != null && !item.getEndLocation().isEmpty())
-                    ? item.getEndLocation() : "Chưa cập nhật";
+                    ? item.getEndLocation()
+                    : "Chưa cập nhật";
             tvStart.setText("Điểm đi: " + startLoc);
             tvEnd.setText("Điểm đến: " + endLoc);
 
@@ -314,12 +327,14 @@ public class DashboardActivity extends AppCompatActivity {
                 btnStart.setText("Chuyến đi đã hoàn thành");
                 btnStart.setEnabled(false);
                 btnStart.setBackgroundColor(ContextCompat.getColor(this, R.color.text_secondary));
-                if (btnReportIncident != null) btnReportIncident.setVisibility(View.GONE);
+                if (btnReportIncident != null)
+                    btnReportIncident.setVisibility(View.GONE);
             } else if ("CANCELLED".equals(status)) {
                 btnStart.setText("Chuyến đi đã hủy");
                 btnStart.setEnabled(false);
                 btnStart.setBackgroundColor(ContextCompat.getColor(this, R.color.text_secondary));
-                if (btnReportIncident != null) btnReportIncident.setVisibility(View.GONE);
+                if (btnReportIncident != null)
+                    btnReportIncident.setVisibility(View.GONE);
             } else if ("IN_PROGRESS".equals(status)) {
                 btnStart.setText("Tiếp tục chuyến đi");
                 btnStart.setEnabled(true);
@@ -328,15 +343,16 @@ public class DashboardActivity extends AppCompatActivity {
                 btnStart.setOnClickListener(v -> handleStartTrip(item));
                 if (btnReportIncident != null) {
                     btnReportIncident.setVisibility(View.VISIBLE);
-                    btnReportIncident.setOnClickListener(v ->
-                            IncidentReportHelper.showReportDialog(this, item.getTripId(), null));
+                    btnReportIncident.setOnClickListener(
+                            v -> IncidentReportHelper.showReportDialog(this, item.getTripId(), null));
                 }
             } else {
                 btnStart.setText("Bắt đầu chuyến đi");
                 btnStart.setEnabled(true);
                 btnStart.setBackgroundResource(R.drawable.bg_btn_start_trip);
                 btnStart.setOnClickListener(v -> handleStartTrip(item));
-                if (btnReportIncident != null) btnReportIncident.setVisibility(View.GONE);
+                if (btnReportIncident != null)
+                    btnReportIncident.setVisibility(View.GONE);
             }
 
             llScheduleContainer.addView(card);
@@ -344,12 +360,15 @@ public class DashboardActivity extends AppCompatActivity {
     }
 
     private void showEmptySchedule() {
-        if (llScheduleContainer != null) llScheduleContainer.removeAllViews();
-        if (cvEmptySchedule != null) cvEmptySchedule.setVisibility(View.VISIBLE);
+        if (llScheduleContainer != null)
+            llScheduleContainer.removeAllViews();
+        if (cvEmptySchedule != null)
+            cvEmptySchedule.setVisibility(View.VISIBLE);
     }
 
     /**
-     * Bắt đầu chuyến đi: Gọi API backend đổi trạng thái sang IN_PROGRESS, sau đó mở buồng lái
+     * Bắt đầu chuyến đi: Gọi API backend đổi trạng thái sang IN_PROGRESS, sau đó mở
+     * buồng lái
      */
     private void handleStartTrip(AssignmentListResponse.AssignmentItem item) {
         if (item == null || item.getTripId() == null || item.getTripId().trim().isEmpty()) {
@@ -390,31 +409,42 @@ public class DashboardActivity extends AppCompatActivity {
      * Chỉ chuyến đi bắt đầu lần đầu mới cần xác thực 2 bước.
      */
     private void startVerificationFlow(AssignmentListResponse.AssignmentItem item) {
-        Intent intent = new Intent(DashboardActivity.this, PreVerificationActivity.class);
+        // Intent intent = new Intent(DashboardActivity.this,
+        // PreVerificationActivity.class);
+        Intent intent = new Intent(DashboardActivity.this, DriverMonitorActivity.class);
         if (item != null) {
-            if (item.getTripId() != null) intent.putExtra("TRIP_ID", item.getTripId());
-            if (item.getVehicleId() != null) intent.putExtra("VEHICLE_ID", item.getVehicleId());
-            if (item.getVehiclePlate() != null) intent.putExtra("VEHICLE_PLATE", item.getVehiclePlate());
+            if (item.getTripId() != null)
+                intent.putExtra("TRIP_ID", item.getTripId());
+            if (item.getVehicleId() != null)
+                intent.putExtra("VEHICLE_ID", item.getVehicleId());
+            if (item.getVehiclePlate() != null)
+                intent.putExtra("VEHICLE_PLATE", item.getVehiclePlate());
         }
         startActivity(intent);
     }
 
     /**
-     * Mọi luồng bắt đầu/tiếp tục chuyến đi đều đi qua màn hình thông báo xác thực 2 bước.
+     * Mọi luồng bắt đầu/tiếp tục chuyến đi đều đi qua màn hình thông báo xác thực 2
+     * bước.
      */
     private void startTripFlow(AssignmentListResponse.AssignmentItem item) {
-        Intent intent = new Intent(DashboardActivity.this, PreVerificationActivity.class);
+        // Intent intent = new Intent(DashboardActivity.this,
+        // PreVerificationActivity.class);
+        Intent intent = new Intent(DashboardActivity.this, DriverMonitorActivity.class);
         if (item != null) {
-            if (item.getTripId() != null) intent.putExtra("TRIP_ID", item.getTripId());
-            if (item.getVehicleId() != null) intent.putExtra("VEHICLE_ID", item.getVehicleId());
-            if (item.getVehiclePlate() != null) intent.putExtra("VEHICLE_PLATE", item.getVehiclePlate());
+            if (item.getTripId() != null)
+                intent.putExtra("TRIP_ID", item.getTripId());
+            if (item.getVehicleId() != null)
+                intent.putExtra("VEHICLE_ID", item.getVehicleId());
+            if (item.getVehiclePlate() != null)
+                intent.putExtra("VEHICLE_PLATE", item.getVehiclePlate());
         }
         startActivity(intent);
     }
 
     private String formatTripTime(AssignmentListResponse.AssignmentItem item) {
         String start = item.getPlannedStartTime() != null ? item.getPlannedStartTime() : item.getStartTime();
-        String end   = item.getPlannedEndTime() != null ? item.getPlannedEndTime() : item.getEndTime();
+        String end = item.getPlannedEndTime() != null ? item.getPlannedEndTime() : item.getEndTime();
 
         if (start != null && !start.isEmpty()) {
             String startFormatted = extractTime(start);
@@ -438,7 +468,8 @@ public class DashboardActivity extends AppCompatActivity {
                 }
                 return timePart;
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
         return isoDateTime;
     }
 
@@ -472,7 +503,8 @@ public class DashboardActivity extends AppCompatActivity {
 
     private void loadDriverProfile(SecureTokenManager tokenManager) {
         String token = tokenManager.getToken();
-        if (token == null || token.isEmpty()) return;
+        if (token == null || token.isEmpty())
+            return;
 
         ApiService api = RetrofitClient.getApiService();
         api.getDriverMe("Bearer " + token).enqueue(new Callback<DriverMeResponse>() {
@@ -487,7 +519,8 @@ public class DashboardActivity extends AppCompatActivity {
                             tokenManager.saveFullName(name);
                         }
                         if (data.getId() != null) {
-                            String code = data.getId().length() > 8 ? data.getId().substring(0, 8).toUpperCase() : data.getId().toUpperCase();
+                            String code = data.getId().length() > 8 ? data.getId().substring(0, 8).toUpperCase()
+                                    : data.getId().toUpperCase();
                             tvDashDriverCode.setText("DRV-" + code);
                             tokenManager.saveToken(token, data.getId());
                         }
