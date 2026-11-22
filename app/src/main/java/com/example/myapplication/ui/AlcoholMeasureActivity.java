@@ -526,8 +526,8 @@ public class AlcoholMeasureActivity extends AppCompatActivity {
                         btnSubmit.setEnabled(true);
                         if (response.isSuccessful()) {
                             Log.i(TAG, "Gửi kết quả đo thành công! HTTP " + response.code());
-                            Toast.makeText(AlcoholMeasureActivity.this, "Ghi nhận kết quả thành công!", Toast.LENGTH_SHORT).show();
-                            handleAlcoholResult();
+                            AlcoholRecordResponse recordResponse = response.body();
+                            handleAlcoholResult(recordResponse);
                         } else {
                             String errBody = "";
                             try {
@@ -566,27 +566,30 @@ public class AlcoholMeasureActivity extends AppCompatActivity {
                 });
     }
 
-    private void handleAlcoholResult() {
+    private void handleAlcoholResult(AlcoholRecordResponse response) {
         runOnUiThread(() -> {
-            if (currentAlcoholLevel <= ALCOHOL_THRESHOLD) {
+            boolean isViolation = false;
+            if (response != null && response.getData() != null && response.getData().getViolation() != null) {
+                isViolation = response.getData().isViolation();
+            } else {
+                isViolation = (currentAlcoholLevel > ALCOHOL_THRESHOLD);
+            }
+
+            if (isViolation) {
+                // Vi phạm nồng độ cồn (data.violation == true)
+                showAlcoholFailedDialog();
+            } else {
                 // Đủ điều kiện lái xe
                 Toast.makeText(this, "Xác nhận đủ điều kiện an toàn lái xe!", Toast.LENGTH_SHORT).show();
                 proceedToMonitor();
-            } else {
-                // Vi phạm nồng độ cồn
-                showAlcoholFailedDialog(currentAlcoholLevel);
             }
         });
     }
 
-    private void showAlcoholFailedDialog(double level) {
+    private void showAlcoholFailedDialog() {
         new AlertDialog.Builder(this)
                 .setTitle("🚫 Không được phép lái xe")
-                .setMessage(String.format(Locale.getDefault(),
-                        "Kết quả đo nồng độ cồn: %.2f mg/L.\n\n"
-                                + "Bạn đã vi phạm quy định an toàn giao thông đường bộ và KHÔNG ĐƯỢC PHÉP bắt đầu chuyến đi.\n\n"
-                                + "Dữ liệu đã được lưu lại hệ thống quản lý.",
-                        level))
+                .setMessage("Nồng độ cồn vượt ngưỡng cho phép. Chuyến đi đã bị hủy và chuyển cho điều hành xử lý.")
                 .setCancelable(false)
                 .setPositiveButton("Đã hiểu, quay về", (dialog, which) -> {
                     dialog.dismiss();

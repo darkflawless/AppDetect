@@ -44,9 +44,8 @@ public class DashboardActivity extends AppCompatActivity {
     private View btnMenuProfile;
     private View tabProfile;
     private View btnLogout;
-    private View btnMenuEditProfile, btnMenuHistory;
+    private View btnMenuHistory;
     private View tabHome, tabSchedule, tabHistory;
-    private View btnMenu, btnNotification;
 
     // Lịch phân công views
     private LinearLayout llScheduleContainer;
@@ -66,13 +65,10 @@ public class DashboardActivity extends AppCompatActivity {
         btnMenuProfile     = findViewById(R.id.btn_menu_profile);
         tabProfile         = findViewById(R.id.tab_profile);
         btnLogout          = findViewById(R.id.btn_logout);
-        btnMenuEditProfile = findViewById(R.id.btn_menu_edit_profile);
         btnMenuHistory     = findViewById(R.id.btn_menu_history);
         tabHome            = findViewById(R.id.tab_home);
         tabSchedule        = findViewById(R.id.tab_schedule);
         tabHistory         = findViewById(R.id.tab_history);
-        btnMenu            = findViewById(R.id.btn_menu);
-        btnNotification    = findViewById(R.id.btn_notification);
 
         // Bind views lịch phân công hôm nay
         llScheduleContainer = findViewById(R.id.ll_schedule_container);
@@ -143,10 +139,7 @@ public class DashboardActivity extends AppCompatActivity {
         View.OnClickListener placeholder = v ->
                 Toast.makeText(DashboardActivity.this, "Chức năng đang phát triển", Toast.LENGTH_SHORT).show();
 
-        if (btnMenuEditProfile != null) btnMenuEditProfile.setOnClickListener(placeholder);
         if (tabSchedule != null) tabSchedule.setOnClickListener(v -> loadTodaySchedule(tokenManager));
-        if (btnMenu != null) btnMenu.setOnClickListener(placeholder);
-        if (btnNotification != null) btnNotification.setOnClickListener(placeholder);
     }
 
     @Override
