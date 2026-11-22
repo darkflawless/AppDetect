@@ -81,7 +81,7 @@ public class LoginActivity extends AppCompatActivity {
                     finish();
                 } else {
                     String msg = (response.body() != null && response.body().getMessage() != null)
-                            ? response.body().getMessage() : "Dang nhap that bai (HTTP " + response.code() + ")";
+                            ? response.body().getMessage() : "Đăng nhập thất bại (HTTP " + response.code() + ")";
                     Toast.makeText(LoginActivity.this, msg, Toast.LENGTH_SHORT).show();
                 }
             }

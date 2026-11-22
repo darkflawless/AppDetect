@@ -69,11 +69,16 @@ public class AlcoholRecordResponse {
         @SerializedName("notes")
         private String notes;
 
+        @SerializedName("violation")
+        private Boolean violation;
+
         public Object getId() { return id; }
         public String getDriverId() { return driverId; }
         public String getDriverName() { return driverName; }
         public Double getAlcoholLevel() { return alcoholLevel; }
         public String getMeasurementTime() { return measurementTime; }
         public String getNotes() { return notes; }
+        public Boolean isViolation() { return violation != null && violation; }
+        public Boolean getViolation() { return violation; }
     }
 }

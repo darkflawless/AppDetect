@@ -1,6 +1,7 @@
 package com.example.myapplication.ui;
 
 import android.Manifest;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.os.Bundle;
@@ -370,10 +371,17 @@ public class DriverMonitorActivity extends AppCompatActivity {
                 .show();
     }
 
+    private void navigateToDashboard() {
+        Intent intent = new Intent(DriverMonitorActivity.this, DashboardActivity.class);
+        intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        startActivity(intent);
+        finish();
+    }
+
     private void performEndTrip() {
         if (tripId == null || tripId.trim().isEmpty()) {
             Toast.makeText(this, "Đã kết thúc phiên giám sát", Toast.LENGTH_SHORT).show();
-            finish();
+            navigateToDashboard();
             return;
         }
 
@@ -381,7 +389,7 @@ public class DriverMonitorActivity extends AppCompatActivity {
         String token = tokenManager.getToken();
         if (token == null || token.isEmpty()) {
             Toast.makeText(this, "Đã kết thúc phiên giám sát", Toast.LENGTH_SHORT).show();
-            finish();
+            navigateToDashboard();
             return;
         }
 
@@ -396,14 +404,14 @@ public class DriverMonitorActivity extends AppCompatActivity {
                     Log.w(TAG, "Kết thúc chuyến đi HTTP: " + response.code());
                     Toast.makeText(DriverMonitorActivity.this, "Chuyến đi đã hoàn thành!", Toast.LENGTH_SHORT).show();
                 }
-                finish();
+                navigateToDashboard();
             }
 
             @Override
             public void onFailure(Call<TripActionResponse> call, Throwable t) {
                 Log.e(TAG, "Lỗi kết nối khi gọi endTrip: " + t.getMessage());
                 Toast.makeText(DriverMonitorActivity.this, "Đã kết thúc chuyến đi!", Toast.LENGTH_SHORT).show();
-                finish();
+                navigateToDashboard();
             }
         });
     }
