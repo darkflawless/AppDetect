@@ -410,8 +410,6 @@ public class DashboardActivity extends AppCompatActivity {
      */
     private void startVerificationFlow(AssignmentListResponse.AssignmentItem item) {
         Intent intent = new Intent(DashboardActivity.this, PreVerificationActivity.class);
-        // Intent intent = new Intent(DashboardActivity.this,
-        // DriverMonitorActivity.class);
         if (item != null) {
             if (item.getTripId() != null)
                 intent.putExtra("TRIP_ID", item.getTripId());
@@ -429,8 +427,6 @@ public class DashboardActivity extends AppCompatActivity {
      */
     private void startTripFlow(AssignmentListResponse.AssignmentItem item) {
         Intent intent = new Intent(DashboardActivity.this, PreVerificationActivity.class);
-        // Intent intent = new Intent(DashboardActivity.this,
-        // DriverMonitorActivity.class);
         if (item != null) {
             if (item.getTripId() != null)
                 intent.putExtra("TRIP_ID", item.getTripId());
