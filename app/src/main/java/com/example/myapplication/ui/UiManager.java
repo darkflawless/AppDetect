@@ -32,11 +32,18 @@ public class UiManager {
     public final TextView confidenceText;
     public final TextView fpsText;
     public final ImageButton btnSwitchCamera;
+    public final TextView btnToggleSound;
     public final Button btnEndTrip;
     public final Button btnReportIncident;
     public final LinearLayout startOverlay;
     public final Button btnStartTrip;
+    public final LinearLayout blackspotWarningBanner;
+    public final TextView blackspotWarningTitle;
+    public final TextView blackspotWarningDetail;
     private final AlertSoundManager alertSoundManager;
+    private long blackspotWarningUntilMs = 0L;
+    private String activeBlackspotName = "";
+    private long activeBlackspotDistance = 0L;
 
     public UiManager(Activity activity) {
         this.activity = activity;
@@ -50,10 +57,44 @@ public class UiManager {
         confidenceText = activity.findViewById(R.id.confidence_text);
         fpsText = activity.findViewById(R.id.fps_text);
         btnSwitchCamera = activity.findViewById(R.id.btn_switch_camera);
+        btnToggleSound = activity.findViewById(R.id.btn_toggle_sound);
         btnEndTrip = activity.findViewById(R.id.btn_end_trip);
         btnReportIncident = activity.findViewById(R.id.btn_report_incident);
         startOverlay = activity.findViewById(R.id.start_overlay);
         btnStartTrip = activity.findViewById(R.id.btn_start_trip);
+        blackspotWarningBanner = activity.findViewById(R.id.blackspot_warning_banner);
+        blackspotWarningTitle = activity.findViewById(R.id.blackspot_warning_title);
+        blackspotWarningDetail = activity.findViewById(R.id.blackspot_warning_detail);
+
+        setupSoundToggle();
+    }
+
+    public void showBlackspotWarning(String spotName, long distanceMeters, String message) {
+        activity.runOnUiThread(() -> {
+            this.blackspotWarningUntilMs = System.currentTimeMillis() + 8000L;
+            this.activeBlackspotName = spotName != null ? spotName : "Điểm đen tai nạn";
+            this.activeBlackspotDistance = distanceMeters;
+
+            redFlashOverlay.setVisibility(View.VISIBLE);
+            if (blackspotWarningBanner != null) {
+                blackspotWarningBanner.setVisibility(View.VISIBLE);
+            }
+            if (blackspotWarningTitle != null) {
+                blackspotWarningTitle.setText("🚨 CẢNH BÁO VÙNG NGUY HIỂM!");
+            }
+            if (blackspotWarningDetail != null) {
+                String detail = (message != null && !message.isEmpty())
+                        ? message
+                        : String.format("%s (cách %dm) - Giảm tốc độ!", activeBlackspotName, distanceMeters);
+                blackspotWarningDetail.setText(detail);
+            }
+
+            statusIcon.setText("🚨");
+            statusText.setText("NGUY HIỂM - VÀO VÙNG ĐIỂM ĐEN!");
+            statusText.setTextColor(Color.RED);
+            confidenceText.setText(String.format("%s (cách %dm)", activeBlackspotName, distanceMeters));
+            alertSoundManager.startAlert();
+        });
     }
 
     public void enableStartButton() {
@@ -71,6 +112,11 @@ public class UiManager {
             float fps, int imgW, int imgH) {
         fpsText.setText(String.format("%.1f FPS", fps));
         bboxOverlay.setDetections(detections, imgW, imgH);
+
+        boolean isBlackspotActive = System.currentTimeMillis() < blackspotWarningUntilMs;
+        if (blackspotWarningBanner != null) {
+            blackspotWarningBanner.setVisibility(isBlackspotActive ? View.VISIBLE : View.GONE);
+        }
 
         // Logic hiển thị cảnh báo an toàn
         if (dResult.isFaceMissing && !dResult.isDrowsy) {
@@ -97,6 +143,14 @@ public class UiManager {
             confidenceText.setText(String.format("Hãy dừng xe! (AI: %.0f%% | EAR: %.2f)",
                     dResult.drowsinessScore * 100f, dResult.ear));
             alertSoundManager.startAlert();
+        } else if (isBlackspotActive) {
+            // Giữ màn hình báo đỏ & còi cảnh báo trong lúc xe đang trong vùng điểm đen nguy hiểm
+            redFlashOverlay.setVisibility(View.VISIBLE);
+            statusIcon.setText("🚨");
+            statusText.setText("NGUY HIỂM - VÀO VÙNG ĐIỂM ĐEN!");
+            statusText.setTextColor(Color.RED);
+            confidenceText.setText(String.format("%s (cách %dm)", activeBlackspotName, activeBlackspotDistance));
+            alertSoundManager.startAlert();
         } else {
             redFlashOverlay.setVisibility(View.GONE);
             alertSoundManager.stopAlert();
@@ -119,6 +173,34 @@ public class UiManager {
                     confidenceText.setText("");
                 }
             }
+        }
+    }
+
+    private void setupSoundToggle() {
+        android.content.SharedPreferences prefs = activity.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE);
+        boolean defaultMuted = prefs.getBoolean("sound_muted", true); // Mặc định tắt tiếng để không ồn khi test
+        alertSoundManager.setMuted(defaultMuted);
+        updateSoundButtonIcon();
+
+        if (btnToggleSound != null) {
+            btnToggleSound.setOnClickListener(v -> {
+                boolean newMuted = !alertSoundManager.isMuted();
+                alertSoundManager.setMuted(newMuted);
+                prefs.edit().putBoolean("sound_muted", newMuted).apply();
+                updateSoundButtonIcon();
+
+                android.widget.Toast.makeText(
+                        activity,
+                        newMuted ? "🔇 Đã tắt âm thanh cảnh báo" : "🔊 Đã bật âm thanh cảnh báo (tít tít)",
+                        android.widget.Toast.LENGTH_SHORT
+                ).show();
+            });
+        }
+    }
+
+    public void updateSoundButtonIcon() {
+        if (btnToggleSound != null) {
+            btnToggleSound.setText(alertSoundManager.isMuted() ? "🔇" : "🔊");
         }
     }
 

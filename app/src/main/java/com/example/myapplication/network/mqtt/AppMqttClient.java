@@ -7,6 +7,7 @@ import com.example.myapplication.data.db.OfflineOutboxDbHelper;
 import com.example.myapplication.utils.AppConfig;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 
 import org.eclipse.paho.client.mqttv3.IMqttActionListener;
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
@@ -50,7 +51,15 @@ public class AppMqttClient {
         void onConnectionLost(Throwable cause);
     }
 
+    public interface BlackspotWarningListener {
+        void onBlackspotWarning(String spotName, long distanceMeters, String message, String hazardType);
+    }
+
     private MqttStatusListener statusListener;
+    private volatile BlackspotWarningListener blackspotWarningListener;
+    private volatile String subscribedVehicleId;
+    private volatile String lastWarningDedupKey = "";
+    private volatile long lastWarningDedupTimeMs = 0L;
 
     public static synchronized AppMqttClient getInstance() {
         if (instance == null) {
@@ -70,6 +79,34 @@ public class AppMqttClient {
 
     public void setStatusListener(MqttStatusListener listener) {
         this.statusListener = listener;
+    }
+
+    public void setBlackspotWarningListener(BlackspotWarningListener listener) {
+        this.blackspotWarningListener = listener;
+    }
+
+    public void subscribeWarnings(String vehicleId) {
+        if (vehicleId != null && !vehicleId.trim().isEmpty()) {
+            this.subscribedVehicleId = vehicleId.trim();
+        }
+        if (isConnected()) {
+            executor.execute(this::subscribeToWarningTopics);
+        }
+    }
+
+    private void subscribeToWarningTopics() {
+        if (mqttClient == null || !mqttClient.isConnected()) return;
+        try {
+            mqttClient.subscribe("driverguard/warnings/all", 1);
+            Log.i(TAG, "🔔 Đã đăng ký nhận cảnh báo Geofence: driverguard/warnings/all");
+            if (subscribedVehicleId != null && !subscribedVehicleId.isEmpty()) {
+                String vehicleTopic = "driverguard/warnings/" + subscribedVehicleId;
+                mqttClient.subscribe(vehicleTopic, 1);
+                Log.i(TAG, "🔔 Đã đăng ký nhận cảnh báo Geofence: " + vehicleTopic);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Lỗi subscribe topic cảnh báo Geofence: " + e.getMessage());
+        }
     }
 
     public synchronized void connect(Context context, String brokerUrl, String clientId) {
@@ -111,6 +148,8 @@ public class AppMqttClient {
                         }
                         // Quét và xả toàn bộ hàng đợi SQLite Outbox khi có mạng
                         drainOutbox();
+                        // Tự động đăng ký nhận cảnh báo điểm đen Geofence từ Backend
+                        subscribeToWarningTopics();
                     }
 
                     @Override
@@ -124,7 +163,11 @@ public class AppMqttClient {
 
                     @Override
                     public void messageArrived(String topic, MqttMessage message) {
-                        Log.d(TAG, "📩 Nhận gói tin từ topic: " + topic);
+                        String payload = new String(message.getPayload());
+                        Log.d(TAG, "📩 Nhận gói tin từ topic: " + topic + " | payload=" + payload);
+                        if (topic != null && topic.startsWith("driverguard/warnings/")) {
+                            handleBlackspotWarningPayload(payload);
+                        }
                     }
 
                     @Override
@@ -139,6 +182,7 @@ public class AppMqttClient {
                     public void onSuccess(IMqttToken asyncActionToken) {
                         isConnected.set(true);
                         Log.i(TAG, "✅ MQTT Handshake hoàn tất");
+                        subscribeToWarningTopics();
                     }
 
                     @Override
@@ -152,6 +196,40 @@ public class AppMqttClient {
                 Log.e(TAG, "Lỗi tạo MQTT Client: " + e.getMessage());
             }
         });
+    }
+
+    private void handleBlackspotWarningPayload(String payload) {
+        try {
+            JsonObject obj = JsonParser.parseString(payload).getAsJsonObject();
+            String spotId = obj.has("blackspot_id") && !obj.get("blackspot_id").isJsonNull()
+                    ? obj.get("blackspot_id").getAsString() : "";
+            String spotName = obj.has("blackspot_name") && !obj.get("blackspot_name").isJsonNull()
+                    ? obj.get("blackspot_name").getAsString() : "Điểm đen tai nạn";
+            long distanceMeters = obj.has("distance_meters") && !obj.get("distance_meters").isJsonNull()
+                    ? obj.get("distance_meters").getAsLong() : 0L;
+            String hazardType = obj.has("hazard_type") && !obj.get("hazard_type").isJsonNull()
+                    ? obj.get("hazard_type").getAsString() : "ACCIDENT_PRONE";
+            String msg = obj.has("message") && !obj.get("message").isJsonNull()
+                    ? obj.get("message").getAsString()
+                    : ("CẢNH BÁO: Đang tiến vào vùng nguy hiểm " + spotName + " (cách " + distanceMeters + "m)!");
+
+            // Khử trùng lặp khi nhận đồng thời từ topic riêng của xe và topic /all trong 2 giây
+            String dedupKey = spotId + "_" + spotName;
+            long now = System.currentTimeMillis();
+            if (dedupKey.equals(lastWarningDedupKey) && (now - lastWarningDedupTimeMs) < 2000L) {
+                return;
+            }
+            lastWarningDedupKey = dedupKey;
+            lastWarningDedupTimeMs = now;
+
+            Log.w(TAG, "🚨 [GEOFENCE WARNING RECEIVED] " + spotName + " (" + distanceMeters + "m)");
+            BlackspotWarningListener listener = this.blackspotWarningListener;
+            if (listener != null) {
+                listener.onBlackspotWarning(spotName, distanceMeters, msg, hazardType);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Lỗi parse gói tin cảnh báo Geofence: " + e.getMessage());
+        }
     }
 
     public boolean isConnected() {

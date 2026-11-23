@@ -359,7 +359,14 @@ public class DriverMonitorActivity extends AppCompatActivity {
                     }
                 });
         wsClient.connect();
+        AppMqttClient.getInstance().setBlackspotWarningListener((spotName, distanceMeters, message, hazardType) -> {
+            Log.w(TAG, "🚨 Nhận cảnh báo vùng nguy hiểm trên điện thoại: " + spotName + " (" + distanceMeters + "m)");
+            if (uiManager != null) {
+                uiManager.showBlackspotWarning(spotName, distanceMeters, message);
+            }
+        });
         AppMqttClient.getInstance().connect(this, null, null);
+        AppMqttClient.getInstance().subscribeWarnings(getTargetVehicle());
     }
 
     private void handleEndTrip() {
@@ -457,6 +464,7 @@ public class DriverMonitorActivity extends AppCompatActivity {
             wsClient.disconnect();
         if (udpSender != null)
             udpSender.close();
+        AppMqttClient.getInstance().setBlackspotWarningListener(null);
         AppMqttClient.getInstance().disconnect();
         LocationTrackingService.stop(this);
     }
